@@ -475,16 +475,8 @@ function fmtBRTime(d){return fmtBR(d)+' '+pad(d.getHours())+':'+pad(d.getMinutes
 function startOfWeek(d){const dd=new Date(d);const day=dd.getDay();dd.setDate(dd.getDate()-day);dd.setHours(0,0,0,0);return dd;}
 
 async function loadDay(ds){
-  // Sempre busca do Firebase (não usa cache antigo em memória) para garantir
-  // que alterações feitas por outros usuários apareçam aqui.
   try{
-    let res = await window.storage.get('checklist:'+ds, false);
-    // Fallback: tenta chave legada (hífens não escapados) caso dados antigos existam
-    if(!res){
-      const legacyKey = 'checklist:'+ds; // encodeKey atual já escapa hífen; tenta direto no Firebase
-      const snap = await fbRoot.child('checklist:'+ds).get();
-      if(snap.exists()) res = { value: snap.val() };
-    }
+    const res = await window.storage.get('checklist:'+ds, false);
     dayCache[ds] = res ? JSON.parse(res.value) : {};
   }catch(e){ dayCache[ds] = dayCache[ds] || {}; }
   return dayCache[ds];
@@ -1840,17 +1832,17 @@ function kSwitchTab(tab){
             concluida:{label:'✅ Concluída',       color:'var(--ok)'},
           };
           const s = statusMap[r.status] || {label:r.status, color:'var(--text)'};
-          result.innerHTML = \`
-            <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;">
-              <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">SOLICITAÇÃO #\${r.id}</div>
-              <div style="font-size:15px;font-weight:700;color:\${s.color};margin-bottom:10px;">\${s.label}</div>
-              <div style="font-size:13px;color:var(--text-dim);"><strong style="color:var(--text);">Local:</strong> \${r.local}</div>
-              <div style="font-size:13px;color:var(--text-dim);margin-top:4px;"><strong style="color:var(--text);">Descrição:</strong> \${r.desc}</div>
-              \${r.assignee ? \`<div style="font-size:13px;color:var(--text-dim);margin-top:4px;"><strong style="color:var(--text);">Responsável:</strong> \${r.assignee}</div>\` : ''}
-              \${r.closedAt ? \`<div style="font-size:13px;color:var(--ok);margin-top:4px;">Concluída em: \${fmtBRTime(new Date(r.closedAt))}</div>\` : ''}
-              <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Aberta em: \${fmtBRTime(new Date(r.createdAt))}</div>
-            </div>
-          \`;
+          const assigneeHtml = r.assignee ? '<div style="font-size:13px;color:var(--text-dim);margin-top:4px;"><strong style="color:var(--text);">Responsável:</strong> '+r.assignee+'</div>' : '';
+          const closedHtml   = r.closedAt  ? '<div style="font-size:13px;color:var(--ok);margin-top:4px;">Concluída em: '+fmtBRTime(new Date(r.closedAt))+'</div>' : '';
+          result.innerHTML =
+            '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;">' +
+              '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">SOLICITAÇÃO #'+r.id+'</div>' +
+              '<div style="font-size:15px;font-weight:700;color:'+s.color+';margin-bottom:10px;">'+s.label+'</div>' +
+              '<div style="font-size:13px;color:var(--text-dim);"><strong style="color:var(--text);">Local:</strong> '+r.local+'</div>' +
+              '<div style="font-size:13px;color:var(--text-dim);margin-top:4px;"><strong style="color:var(--text);">Descrição:</strong> '+r.desc+'</div>' +
+              assigneeHtml + closedHtml +
+              '<div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Aberta em: '+fmtBRTime(new Date(r.createdAt))+'</div>' +
+            '</div>';
         });
       }
     }, 100);
