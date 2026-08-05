@@ -1158,6 +1158,7 @@ async function renderRequests(){
   app.innerHTML = `<div class="req-tabs">
     <button data-tab="new" class="${reqTab==='new'?'active':''}">+ Nova solicitação</button>
     <button data-tab="track" class="${reqTab==='track'?'active':''}">Acompanhar / Painel</button>
+    <button data-tab="qr" onclick="showQRModal();event.stopPropagation();" style="background:transparent;border:1px solid rgba(63,214,201,.4);color:#3fd6c9;margin-left:auto;">📱 QR Code</button>
   </div><div id="reqContent"></div>`;
 
   app.querySelectorAll('.req-tabs button').forEach(b=>{
@@ -1662,6 +1663,34 @@ document.getElementById('navChecklist').addEventListener('click', ()=>{
   renderTopControls();
   renderChecklist();
 });
+function showQRModal(){
+  let overlay = document.getElementById('qrModalOverlay');
+  if(overlay){ overlay.style.display='flex'; return; }
+  overlay = document.createElement('div');
+  overlay.id = 'qrModalOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:9998;padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:#1c2b2d;border:1px solid #2a4547;border-radius:16px;padding:28px 32px;max-width:360px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.6);">
+      <div style="font-size:15px;font-weight:700;color:#3fd6c9;margin-bottom:4px;">📱 Acesse o Sistema</div>
+      <div style="font-size:12px;color:#8fb0ae;margin-bottom:18px;">Aponte a câmera para o QR Code</div>
+      <div id="qrCodeContainer" style="background:#fff;border-radius:12px;padding:16px;display:inline-block;margin-bottom:16px;"></div>
+      <div style="font-size:11px;color:#8fb0ae;word-break:break-all;margin-bottom:18px;">https://log-meli-betim.github.io/sistema-limpeza</div>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        <button onclick="navigator.clipboard.writeText('https://log-meli-betim.github.io/sistema-limpeza').then(()=>alert('Link copiado!'))" style="background:#1f8a8c;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;">📋 Copiar link</button>
+        <button onclick="document.getElementById('qrModalOverlay').style.display='none'" style="background:transparent;color:#8fb0ae;border:1px solid #2a4547;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;">Fechar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.style.display='none'; });
+  // Generate QR using free API
+  const qrImg = document.createElement('img');
+  qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data='+encodeURIComponent('https://log-meli-betim.github.io/sistema-limpeza');
+  qrImg.style.cssText = 'width:180px;height:180px;border-radius:4px;';
+  qrImg.alt = 'QR Code';
+  document.getElementById('qrCodeContainer').appendChild(qrImg);
+}
+
 document.getElementById('navRequests').addEventListener('click', ()=>{
   section='requests';
   document.getElementById('navRequests').classList.add('active');
@@ -1679,6 +1708,74 @@ document.getElementById('navReport').addEventListener('click', ()=>{
   renderReport();
 });
 
+/* ===================== MODO QUIOSQUE (QR Code) ===================== */
+async function renderKiosk(){
+  const app = document.getElementById('app');
+  app.style.maxWidth = '520px';
+  app.style.margin = '0 auto';
+  app.style.padding = '20px 16px';
+
+  let optionsHtml = LOCATION_NAMES.map(n=>`<option value="${n}">${n}</option>`).join('');
+
+  app.innerHTML = `
+    <div style="text-align:center;margin-bottom:20px;">
+      <div style="font-size:22px;font-weight:900;color:var(--teal-bright);">🧹 Solicitação de Limpeza</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Mercado Livre Betim — MG02</div>
+    </div>
+    <div class="card">
+      <div class="form-row"><label>Seu nome</label><input type="text" id="kNome" placeholder="Ex: João Silva"></div>
+      <div class="form-row"><label>Local</label><select id="kLocal">${optionsHtml}</select></div>
+      <div class="form-row"><label>Descreva a solicitação</label><textarea id="kDesc" rows="3" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
+      <div class="form-row"><label>Foto (opcional)</label><input type="file" id="kFoto" accept="image/*" capture="environment"></div>
+      <div class="form-row"><label>Prioridade</label>
+        <select id="kPrio">
+          <option value="normal">Normal</option>
+          <option value="alta">Urgente</option>
+        </select>
+      </div>
+      <div id="kError" style="color:var(--bad);font-size:12.5px;min-height:16px;"></div>
+      <button class="btn" id="kSubmit" style="width:100%;margin-top:8px;padding:14px;">Enviar solicitação</button>
+    </div>
+    <div id="kSuccess" style="display:none;text-align:center;padding:32px 16px;">
+      <div style="font-size:48px;margin-bottom:12px;">✅</div>
+      <div style="font-size:18px;font-weight:700;color:var(--ok);">Solicitação enviada!</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-top:8px;">Nossa equipe foi notificada e atenderá em breve.</div>
+      <button class="btn secondary" style="margin-top:24px;" onclick="renderKiosk()">+ Nova solicitação</button>
+    </div>
+  `;
+
+  let reqFotoDataUrl = null;
+  document.getElementById('kFoto').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if(!file){ reqFotoDataUrl=null; return; }
+    try{ reqFotoDataUrl = await compressImageWithLimit(file, 700*1024); }
+    catch(e){ reqFotoDataUrl=null; }
+  });
+
+  document.getElementById('kSubmit').addEventListener('click', async ()=>{
+    const nome  = document.getElementById('kNome').value.trim();
+    const local = document.getElementById('kLocal').value;
+    const desc  = document.getElementById('kDesc').value.trim();
+    const prio  = document.getElementById('kPrio').value;
+    const errEl = document.getElementById('kError');
+
+    if(!nome){ errEl.textContent='Informe seu nome.'; return; }
+    if(!desc){ errEl.textContent='Descreva a solicitação.'; return; }
+    errEl.textContent='';
+
+    document.getElementById('kSubmit').disabled = true;
+    document.getElementById('kSubmit').textContent = 'Enviando...';
+
+    const now = Date.now();
+    const id = now.toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
+    const obj = {id, nome, local, desc, prio, status:'aberta', createdAt:now, updatedAt:now, foto:reqFotoDataUrl||null};
+    await saveRequest(id, obj);
+
+    document.querySelector('.card').style.display='none';
+    document.getElementById('kSuccess').style.display='block';
+  });
+}
+
 /* ===================== INIT ===================== */
 (async ()=>{
   await loadEmployee();
@@ -1690,8 +1787,18 @@ document.getElementById('navReport').addEventListener('click', ()=>{
       showAdminBadge();
     }
   }catch(e){}
-  renderTopControls();
-  renderChecklist();
+  // Modo quiosque: acessado via QR code (?tab=requests) → só formulário, sem nav
+  const urlParams = new URLSearchParams(window.location.search);
+  if(urlParams.get('tab') === 'requests'){
+    // Oculta header e nav — interface limpa só para solicitação
+    document.querySelector('.topbar')  && (document.querySelector('.topbar').style.display  = 'none');
+    document.querySelector('.mainnav') && (document.querySelector('.mainnav').style.display = 'none');
+    // Renderiza diretamente o formulário de nova solicitação no modo quiosque
+    renderKiosk();
+  } else {
+    renderTopControls();
+    renderChecklist();
+  }
 })();
 </script>
 </body>
