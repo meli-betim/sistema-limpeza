@@ -235,6 +235,14 @@ const fbRequestsRef = fbRoot.child('requests');
 // em vez de sincronizadas entre todos os usuários.
 const LOCAL_ONLY_KEYS = new Set(['currentEmployee']);
 
+// Wrapper com timeout para evitar travamento em chamadas Firebase
+function withTimeout(promise, ms=8000){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')), ms))
+  ]);
+}
+
 window.storage = {
   async get(key, shared){
     if(LOCAL_ONLY_KEYS.has(key)){
@@ -244,7 +252,7 @@ window.storage = {
       }catch(e){ return null; }
     }
     try{
-      const snap = await fbRoot.child(encodeKey(key)).get();
+      const snap = await withTimeout(fbRoot.child(encodeKey(key)).get());
       if(!snap.exists()) return null;
       return { key, value: snap.val(), shared: !!shared };
     }catch(e){ console.error('Firebase get error', e); return null; }
@@ -257,7 +265,7 @@ window.storage = {
       }catch(e){ return null; }
     }
     try{
-      await fbRoot.child(encodeKey(key)).set(value);
+      await withTimeout(fbRoot.child(encodeKey(key)).set(value));
       return { key, value, shared: !!shared };
     }catch(e){ console.error('Firebase set error', e); return null; }
   },
@@ -267,13 +275,13 @@ window.storage = {
       catch(e){ return null; }
     }
     try{
-      await fbRoot.child(encodeKey(key)).remove();
+      await withTimeout(fbRoot.child(encodeKey(key)).remove());
       return { key, deleted:true, shared: !!shared };
     }catch(e){ console.error('Firebase delete error', e); return null; }
   },
   async list(prefix, shared){
     try{
-      const snap = await fbRoot.get();
+      const snap = await withTimeout(fbRoot.get());
       if(!snap.exists()) return { keys:[], prefix, shared: !!shared };
       const all = Object.keys(snap.val()).map(decodeKey);
       const keys = prefix ? all.filter(k=>k.startsWith(prefix)) : all;
@@ -938,9 +946,9 @@ async function migrateOldRequestsIfNeeded(){
   if(_migrated) return;
   _migrated = true;
   try{
-    const oldSnap = await fbRoot.child('allreqs').get();
+    const oldSnap = await withTimeout(fbRoot.child('allreqs').get(), 5000);
     if(oldSnap.exists()){
-      const newSnap = await fbRequestsRef.get();
+      const newSnap = await withTimeout(fbRequestsRef.get(), 5000);
       if(!newSnap.exists()){
         const arr = JSON.parse(oldSnap.val());
         if(Array.isArray(arr) && arr.length){
@@ -958,7 +966,7 @@ async function ensureRequestsLoaded(){
   // solicitações criadas/alteradas por outros usuários.
   await migrateOldRequestsIfNeeded();
   try{
-    const snap = await fbRequestsRef.get();
+    const snap = await withTimeout(fbRequestsRef.get());
     _requests = snap.exists() ? Object.values(snap.val()) : [];
   }catch(e){ /* mantém dados atuais em memória se a busca falhar */ }
   _reqLoaded = true;
@@ -1724,9 +1732,10 @@ async function renderKiosk(){
       <div style="font-size:22px;font-weight:900;color:var(--teal-bright);">🧹 Solicitação de Limpeza</div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Mercado Livre Betim — MG02</div>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
-      <button id="kTabNew" onclick="kSwitchTab('new')" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--teal);color:#fff;font-weight:700;font-size:14px;cursor:pointer;">+ Nova solicitação</button>
-      <button id="kTabCheck" onclick="kSwitchTab('check')" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-weight:600;font-size:14px;cursor:pointer;">🔍 Consultar status</button>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+      <button id="kTabNew" onclick="kSwitchTab('new')" style="flex:1;min-width:120px;padding:10px;border-radius:8px;border:none;background:var(--teal);color:#fff;font-weight:700;font-size:13px;cursor:pointer;">+ Nova solicitação</button>
+      <button id="kTabMine" onclick="kSwitchTab('mine')" style="flex:1;min-width:120px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-weight:600;font-size:13px;cursor:pointer;">📋 Minhas solicitações</button>
+      <button id="kTabCheck" onclick="kSwitchTab('check')" style="flex:1;min-width:120px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-weight:600;font-size:13px;cursor:pointer;">🔍 Consultar por código</button>
     </div>
     <div id="kPanelNew">
       <div class="card">
@@ -1760,6 +1769,16 @@ async function renderKiosk(){
         </div>
         <button class="btn" id="kSearchBtn" style="width:100%;padding:14px;">Consultar</button>
         <div id="kCheckResult" style="margin-top:16px;"></div>
+      </div>
+    </div>
+    <div id="kPanelMine" style="display:none;">
+      <div class="card">
+        <div class="form-row">
+          <label>Seu nome</label>
+          <input type="text" id="kMineInput" placeholder="Digite seu nome para buscar">
+        </div>
+        <button class="btn" id="kMineBtn" style="width:100%;padding:14px;">Buscar minhas solicitações</button>
+        <div id="kMineResult" style="margin-top:16px;"></div>
       </div>
     </div>
   `;
@@ -1801,13 +1820,16 @@ async function renderKiosk(){
 function kSwitchTab(tab){
   document.getElementById('kPanelNew').style.display    = tab==='new'   ? 'block' : 'none';
   document.getElementById('kPanelCheck').style.display  = tab==='check' ? 'block' : 'none';
+  document.getElementById('kPanelMine').style.display   = tab==='mine'  ? 'block' : 'none';
   document.getElementById('kSuccess').style.display     = 'none';
-  document.getElementById('kTabNew').style.background   = tab==='new'   ? 'var(--teal)' : 'var(--panel)';
-  document.getElementById('kTabNew').style.color        = tab==='new'   ? '#fff'        : 'var(--text)';
-  document.getElementById('kTabNew').style.border       = tab==='new'   ? 'none'        : '1px solid var(--line)';
-  document.getElementById('kTabCheck').style.background = tab==='check' ? 'var(--teal)' : 'var(--panel)';
-  document.getElementById('kTabCheck').style.color      = tab==='check' ? '#fff'        : 'var(--text)';
-  document.getElementById('kTabCheck').style.border     = tab==='check' ? 'none'        : '1px solid var(--line)';
+  ['kTabNew','kTabMine','kTabCheck'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    const active = (id==='kTabNew'&&tab==='new')||(id==='kTabMine'&&tab==='mine')||(id==='kTabCheck'&&tab==='check');
+    el.style.background = active ? 'var(--teal)' : 'var(--panel)';
+    el.style.color      = active ? '#fff'        : 'var(--text)';
+    el.style.border     = active ? 'none'        : '1px solid var(--line)';
+  });
 
   if(tab==='check'){
     // Wire search button
@@ -1843,6 +1865,41 @@ function kSwitchTab(tab){
               assigneeHtml + closedHtml +
               '<div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Aberta em: '+fmtBRTime(new Date(r.createdAt))+'</div>' +
             '</div>';
+        });
+      }
+      // Wire mine button
+      const mineBtn = document.getElementById('kMineBtn');
+      if(mineBtn && !mineBtn._wired){
+        mineBtn._wired = true;
+        mineBtn.addEventListener('click', async ()=>{
+          const nome = document.getElementById('kMineInput').value.trim().toLowerCase();
+          const result = document.getElementById('kMineResult');
+          if(!nome){ result.innerHTML='<div style="color:var(--bad);font-size:13px;">Informe seu nome.</div>'; return; }
+          mineBtn.disabled=true; mineBtn.textContent='Buscando...';
+          await ensureRequestsLoaded();
+          const found = _requests.filter(r=> r.nome && r.nome.toLowerCase().includes(nome) && r.status!=='concluida')
+                                  .sort((a,b)=>b.createdAt-a.createdAt);
+          mineBtn.disabled=false; mineBtn.textContent='Buscar minhas solicitações';
+          if(!found.length){
+            result.innerHTML='<div style="font-size:13px;color:var(--text-dim);text-align:center;padding:20px 0;">Nenhuma solicitação aberta encontrada para "<strong>'+nome+'</strong>".</div>';
+            return;
+          }
+          const statusMap={aberta:{label:'⏳ Pendente',color:'var(--amber)'},andamento:{label:'🔧 Em andamento',color:'var(--teal-bright)'},concluida:{label:'✅ Concluída',color:'var(--ok)'}};
+          result.innerHTML = '<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">'+found.length+' solicitação(ões) encontrada(s):</div>' +
+            found.map(r=>{
+              const s=statusMap[r.status]||{label:r.status,color:'var(--text)'};
+              const assigneeHtml = r.assignee ? '<div style="font-size:12px;color:var(--text-dim);margin-top:3px;">👤 Responsável: '+r.assignee+'</div>' : '';
+              return '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px;">'+
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
+                  '<span style="font-size:11px;color:var(--text-dim);">#'+r.id+'</span>'+
+                  '<span style="font-size:12px;font-weight:700;color:'+s.color+';">'+s.label+'</span>'+
+                '</div>'+
+                '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">'+r.local+'</div>'+
+                '<div style="font-size:12px;color:var(--text-dim);">'+r.desc+'</div>'+
+                assigneeHtml+
+                '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Aberta em: '+fmtBRTime(new Date(r.createdAt))+'</div>'+
+              '</div>';
+            }).join('');
         });
       }
     }, 100);
