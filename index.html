@@ -1728,29 +1728,47 @@ async function renderKiosk(){
   let optionsHtml = LOCATION_NAMES.map(n=>`<option value="${n}">${n}</option>`).join('');
 
   app.innerHTML = `
-    <div style="text-align:center;margin-bottom:20px;">
+    <div style="text-align:center;margin-bottom:16px;">
       <div style="font-size:22px;font-weight:900;color:var(--teal-bright);">🧹 Solicitação de Limpeza</div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Mercado Livre Betim — MG02</div>
     </div>
-    <div class="card">
-      <div class="form-row"><label>Seu nome</label><input type="text" id="kNome" placeholder="Ex: João Silva"></div>
-      <div class="form-row"><label>Local</label><select id="kLocal">${optionsHtml}</select></div>
-      <div class="form-row"><label>Descreva a solicitação</label><textarea id="kDesc" rows="3" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
-      <div class="form-row"><label>Foto (opcional)</label><input type="file" id="kFoto" accept="image/*" capture="environment"></div>
-      <div class="form-row"><label>Prioridade</label>
-        <select id="kPrio">
-          <option value="normal">Normal</option>
-          <option value="alta">Urgente</option>
-        </select>
-      </div>
-      <div id="kError" style="color:var(--bad);font-size:12.5px;min-height:16px;"></div>
-      <button class="btn" id="kSubmit" style="width:100%;margin-top:8px;padding:14px;">Enviar solicitação</button>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button id="kTabNew" onclick="kSwitchTab('new')" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--teal);color:#fff;font-weight:700;font-size:14px;cursor:pointer;">+ Nova solicitação</button>
+      <button id="kTabCheck" onclick="kSwitchTab('check')" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-weight:600;font-size:14px;cursor:pointer;">🔍 Consultar status</button>
     </div>
-    <div id="kSuccess" style="display:none;text-align:center;padding:32px 16px;">
+    <div id="kPanelNew">
+      <div class="card">
+        <div class="form-row"><label>Seu nome</label><input type="text" id="kNome" placeholder="Ex: João Silva"></div>
+        <div class="form-row"><label>Local</label><select id="kLocal">${optionsHtml}</select></div>
+        <div class="form-row"><label>Descreva a solicitação</label><textarea id="kDesc" rows="3" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
+        <div class="form-row"><label>Foto (opcional)</label><input type="file" id="kFoto" accept="image/*" capture="environment"></div>
+        <div class="form-row"><label>Prioridade</label>
+          <select id="kPrio">
+            <option value="normal">Normal</option>
+            <option value="alta">Urgente</option>
+          </select>
+        </div>
+        <div id="kError" style="color:var(--bad);font-size:12.5px;min-height:16px;"></div>
+        <button class="btn" id="kSubmit" style="width:100%;margin-top:8px;padding:14px;">Enviar solicitação</button>
+      </div>
+    </div>
+    <div id="kSuccess" style="display:none;text-align:center;padding:24px 16px;">
       <div style="font-size:48px;margin-bottom:12px;">✅</div>
       <div style="font-size:18px;font-weight:700;color:var(--ok);">Solicitação enviada!</div>
-      <div style="font-size:13px;color:var(--text-dim);margin-top:8px;">Nossa equipe foi notificada e atenderá em breve.</div>
-      <button class="btn secondary" style="margin-top:24px;" onclick="renderKiosk()">+ Nova solicitação</button>
+      <div style="font-size:13px;color:var(--text-dim);margin-top:8px;">Guarde seu código para acompanhar:</div>
+      <div id="kSuccessCode" style="font-size:22px;font-weight:900;color:var(--teal-bright);margin:14px 0;letter-spacing:1px;background:var(--panel);padding:12px 20px;border-radius:10px;display:inline-block;"></div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:20px;">Use este código na aba "Consultar status"</div>
+      <button class="btn secondary" style="width:100%;" onclick="renderKiosk()">+ Nova solicitação</button>
+    </div>
+    <div id="kPanelCheck" style="display:none;">
+      <div class="card">
+        <div class="form-row">
+          <label>Código da solicitação</label>
+          <input type="text" id="kCodeInput" placeholder="Ex: L2207-P83D" style="text-transform:uppercase;">
+        </div>
+        <button class="btn" id="kSearchBtn" style="width:100%;padding:14px;">Consultar</button>
+        <div id="kCheckResult" style="margin-top:16px;"></div>
+      </div>
     </div>
   `;
 
@@ -1781,9 +1799,62 @@ async function renderKiosk(){
     const obj = {id, nome, local, desc, prio, status:'aberta', createdAt:now, updatedAt:now, foto:reqFotoDataUrl||null};
     await saveRequest(id, obj);
 
-    document.querySelector('.card').style.display='none';
+    document.getElementById('kPanelNew').style.display='none';
     document.getElementById('kSuccess').style.display='block';
+    document.getElementById('kSuccessCode').textContent = '#'+id;
   });
+}
+
+// Troca de aba no quiosque
+function kSwitchTab(tab){
+  document.getElementById('kPanelNew').style.display    = tab==='new'   ? 'block' : 'none';
+  document.getElementById('kPanelCheck').style.display  = tab==='check' ? 'block' : 'none';
+  document.getElementById('kSuccess').style.display     = 'none';
+  document.getElementById('kTabNew').style.background   = tab==='new'   ? 'var(--teal)' : 'var(--panel)';
+  document.getElementById('kTabNew').style.color        = tab==='new'   ? '#fff'        : 'var(--text)';
+  document.getElementById('kTabNew').style.border       = tab==='new'   ? 'none'        : '1px solid var(--line)';
+  document.getElementById('kTabCheck').style.background = tab==='check' ? 'var(--teal)' : 'var(--panel)';
+  document.getElementById('kTabCheck').style.color      = tab==='check' ? '#fff'        : 'var(--text)';
+  document.getElementById('kTabCheck').style.border     = tab==='check' ? 'none'        : '1px solid var(--line)';
+
+  if(tab==='check'){
+    // Wire search button
+    setTimeout(()=>{
+      const btn = document.getElementById('kSearchBtn');
+      if(btn && !btn._wired){
+        btn._wired = true;
+        btn.addEventListener('click', async ()=>{
+          const code = document.getElementById('kCodeInput').value.trim().toUpperCase().replace('#','');
+          const result = document.getElementById('kCheckResult');
+          if(!code){ result.innerHTML='<div style="color:var(--bad);font-size:13px;">Informe o código.</div>'; return; }
+          btn.disabled=true; btn.textContent='Consultando...';
+          const r = await loadRequest(code);
+          btn.disabled=false; btn.textContent='Consultar';
+          if(!r || !r.id){
+            result.innerHTML='<div style="color:var(--bad);font-size:13px;">Solicitação não encontrada. Verifique o código.</div>';
+            return;
+          }
+          const statusMap = {
+            aberta:   {label:'⏳ Pendente',      color:'var(--amber)'},
+            andamento:{label:'🔧 Em andamento',   color:'var(--teal-bright)'},
+            concluida:{label:'✅ Concluída',       color:'var(--ok)'},
+          };
+          const s = statusMap[r.status] || {label:r.status, color:'var(--text)'};
+          result.innerHTML = \`
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;">
+              <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">SOLICITAÇÃO #\${r.id}</div>
+              <div style="font-size:15px;font-weight:700;color:\${s.color};margin-bottom:10px;">\${s.label}</div>
+              <div style="font-size:13px;color:var(--text-dim);"><strong style="color:var(--text);">Local:</strong> \${r.local}</div>
+              <div style="font-size:13px;color:var(--text-dim);margin-top:4px;"><strong style="color:var(--text);">Descrição:</strong> \${r.desc}</div>
+              \${r.assignee ? \`<div style="font-size:13px;color:var(--text-dim);margin-top:4px;"><strong style="color:var(--text);">Responsável:</strong> \${r.assignee}</div>\` : ''}
+              \${r.closedAt ? \`<div style="font-size:13px;color:var(--ok);margin-top:4px;">Concluída em: \${fmtBRTime(new Date(r.closedAt))}</div>\` : ''}
+              <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Aberta em: \${fmtBRTime(new Date(r.createdAt))}</div>
+            </div>
+          \`;
+        });
+      }
+    }, 100);
+  }
 }
 
 /* ===================== INIT ===================== */
