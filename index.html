@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Sistema de Limpeza — Mercado Livre Betim</title>
 <style>
   :root{
@@ -1711,9 +1713,10 @@ document.getElementById('navReport').addEventListener('click', ()=>{
 /* ===================== MODO QUIOSQUE (QR Code) ===================== */
 async function renderKiosk(){
   const app = document.getElementById('app');
-  app.style.maxWidth = '520px';
-  app.style.margin = '0 auto';
-  app.style.padding = '20px 16px';
+  app.style.maxWidth = '100%';
+  app.style.margin = '0';
+  app.style.padding = '16px';
+  app.style.boxSizing = 'border-box';
 
   let optionsHtml = LOCATION_NAMES.map(n=>`<option value="${n}">${n}</option>`).join('');
 
