@@ -177,6 +177,16 @@
   .row-ok{color:var(--ok);font-weight:700;}
   .row-warn{color:var(--bad);font-weight:700;}
   .section-title{font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin:24px 0 10px;}
+  /* Modo quiosque mobile */
+  body.kiosk { font-size: 16px; }
+  body.kiosk .wrap { max-width: 100% !important; padding: 16px !important; margin: 0 !important; }
+  body.kiosk .card { border-radius: 12px; }
+  body.kiosk input, body.kiosk select, body.kiosk textarea {
+    font-size: 16px !important; /* evita zoom automático no iOS */
+    padding: 14px 12px !important;
+  }
+  body.kiosk label { font-size: 14px !important; }
+  body.kiosk .btn { font-size: 16px !important; padding: 16px !important; }
 </style>
 </head>
 <body>
@@ -1713,10 +1723,9 @@ document.getElementById('navReport').addEventListener('click', ()=>{
 /* ===================== MODO QUIOSQUE (QR Code) ===================== */
 async function renderKiosk(){
   const app = document.getElementById('app');
-  app.style.maxWidth = '100%';
-  app.style.margin = '0';
-  app.style.padding = '16px';
-  app.style.boxSizing = 'border-box';
+  // Sobrescreve o .wrap para ocupar tela toda no mobile
+  document.body.classList.add('kiosk');
+  app.style.cssText = 'max-width:100% !important;width:100% !important;margin:0 !important;padding:16px !important;box-sizing:border-box !important;';
 
   let optionsHtml = LOCATION_NAMES.map(n=>`<option value="${n}">${n}</option>`).join('');
 
