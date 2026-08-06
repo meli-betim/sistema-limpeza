@@ -2234,60 +2234,30 @@ async function renderKiosk(){
 
   let reqFotoDataUrl = null;
 
-  // Autocomplete Local — MESMO componente exato de +Solicitações web
+  // Autocomplete Local — mesmo componente do checklist e do formulário principal
   (function(){
     const input = document.getElementById('kLocalSearch');
     const dd    = document.getElementById('kLocalDD');
     const hidden= document.getElementById('kLocal');
     if(!input||!dd||!hidden) return;
-
     const allItems = LOCATION_NAMES.map(n=>({value:n, text:n}));
-
-    function getFiltered(q){
-      return q ? allItems.filter(i=>i.text.toLowerCase().includes(q.toLowerCase())) : allItems;
-    }
-
+    function getFiltered(q){ return q ? allItems.filter(i=>i.text.toLowerCase().includes(q.toLowerCase())) : allItems; }
     function openDD(q){
       const filtered = getFiltered(q);
       dd.innerHTML = '';
-      if(!filtered.length){
-        dd.innerHTML = '<div class="lsearch-empty">Nenhum ambiente encontrado</div>';
-      } else {
-        filtered.forEach(item=>{
-          const div = document.createElement('div');
-          div.className = 'lsearch-item';
-          div.textContent = item.text;
-          div.addEventListener('mousedown', e=>{
-            e.preventDefault();
-            input.value = item.text;
-            hidden.value = item.value;
-            dd.classList.remove('open');
-          });
-          div.addEventListener('touchend', e=>{
-            e.preventDefault();
-            input.value = item.text;
-            hidden.value = item.value;
-            dd.classList.remove('open');
-          });
-          dd.appendChild(div);
-        });
-      }
+      if(!filtered.length){ dd.innerHTML='<div class="lsearch-empty">Nenhum ambiente encontrado</div>'; }
+      else { filtered.forEach(item=>{ const div=document.createElement('div'); div.className='lsearch-item'; div.textContent=item.text; div.addEventListener('mousedown',e=>{ e.preventDefault(); input.value=item.text; hidden.value=item.value; dd.classList.remove('open'); }); div.addEventListener('touchend',e=>{ e.preventDefault(); input.value=item.text; hidden.value=item.value; dd.classList.remove('open'); input.blur(); }); dd.appendChild(div); }); }
       dd.classList.add('open');
     }
-
-    input.addEventListener('focus', ()=>{ input.select(); openDD(input.value); });
-    input.addEventListener('input', ()=>{ openDD(input.value); if(getFiltered(input.value).length===1){ hidden.value=getFiltered(input.value)[0].value; } });
-    input.addEventListener('blur',  ()=>{ setTimeout(()=>dd.classList.remove('open'), 200); });
-    input.addEventListener('keydown', e=>{
-      if(e.key==='Escape'){ input.value=''; openDD(''); }
-      if(e.key==='Enter'){
-        const f=getFiltered(input.value);
-        if(f.length>=1){ input.value=f[0].text; hidden.value=f[0].value; dd.classList.remove('open'); }
-        e.preventDefault();
-      }
-    });
+    // iOS Safari: usar click em vez de focus para garantir abertura do dropdown
+    input.addEventListener('click', ()=>{ openDD(input.value); });
+    input.addEventListener('focus', ()=>{ openDD(input.value); });
+    input.addEventListener('touchstart', ()=>{ setTimeout(()=>openDD(input.value), 50); }, {passive:true});
+    input.addEventListener('input', ()=>{ openDD(input.value); if(getFiltered(input.value).length===1) hidden.value=getFiltered(input.value)[0].value; });
+    input.addEventListener('blur',  ()=>{ setTimeout(()=>dd.classList.remove('open'), 300); });
+    input.addEventListener('keydown', e=>{ if(e.key==='Escape'){ input.value=''; openDD(''); } if(e.key==='Enter'){ const f=getFiltered(input.value); if(f.length>=1){ input.value=f[0].text; hidden.value=f[0].value; dd.classList.remove('open'); } e.preventDefault(); } });
     document.addEventListener('click', e=>{ if(!input.contains(e.target)&&!dd.contains(e.target)) dd.classList.remove('open'); });
-
+    document.addEventListener('touchstart', e=>{ if(!input.contains(e.target)&&!dd.contains(e.target)) dd.classList.remove('open'); }, {passive:true});
     input.value = allItems[0]?.text || '';
     hidden.value = allItems[0]?.value || '';
   })();
