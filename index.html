@@ -1795,24 +1795,39 @@ function makeSearchableSelect(selectId){
   if(!sel || sel._searchable) return;
   sel._searchable = true;
 
-  // Cria input de busca acima do select
+  // Wrap select + search in a container
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;width:100%;';
+  sel.parentNode.insertBefore(wrap, sel);
+
+  // Search input
   const input = document.createElement('input');
   input.type = 'text';
   input.autocomplete = 'off';
   input.placeholder = '🔍  Buscar local...';
-  input.style.cssText = 'width:100%;padding:9px 12px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:14px;font-family:inherit;margin-bottom:6px;display:block;';
-  sel.parentNode.insertBefore(input, sel);
+  // Lê as cores reais do tema para garantir visibilidade em qualquer modo
+  const cs = getComputedStyle(document.documentElement);
+  const bgColor = cs.getPropertyValue('--panel-2').trim() || '#1c3436';
+  const bdColor = cs.getPropertyValue('--line').trim() || '#2a4547';
+  const txColor = cs.getPropertyValue('--text').trim() || '#e8f3f2';
+  input.style.cssText = `width:100%;padding:10px 12px;background:${bgColor};border:1.5px solid ${bdColor};color:${txColor};border-radius:8px;font-size:16px;font-family:inherit;box-sizing:border-box;outline:none;`;
+  wrap.appendChild(input);
+
+  // Move select into wrap
+  wrap.appendChild(sel);
+  sel.style.width = '100%';
 
   const allOptions = Array.from(sel.options);
 
   input.addEventListener('input', ()=>{
     const q = input.value.toLowerCase().trim();
+    let firstMatch = null;
     allOptions.forEach(opt=>{
-      opt.style.display = (!q || opt.text.toLowerCase().includes(q)) ? '' : 'none';
+      const match = !q || opt.text.toLowerCase().includes(q);
+      opt.style.display = match ? '' : 'none';
+      if(match && !firstMatch) firstMatch = opt;
     });
-    // Auto-select first visible
-    const first = allOptions.find(o=>o.style.display!=='none');
-    if(first && q) sel.value = first.value;
+    if(firstMatch && q) sel.value = firstMatch.value;
   });
 
   input.addEventListener('keydown', e=>{
