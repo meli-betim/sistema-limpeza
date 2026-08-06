@@ -85,10 +85,11 @@
   #navAdmin{background:transparent;border:1px solid rgba(227,179,65,.4);color:#e3b341;font-size:12.5px;padding:5px 12px;border-radius:20px;cursor:pointer;transition:background .2s;}
   #navAdmin:hover{background:rgba(227,179,65,.15);}
   #navAdmin.active{background:#e3b341;color:#000;}
-    /* Local search input */
-  .loc-search-input {
+    /* Autocomplete de local */
+  .loc-ac-wrap { position: relative; width: 100%; }
+  .loc-ac-input {
     width: 100%;
-    padding: 10px 12px !important;
+    padding: 10px 36px 10px 12px !important;
     background: var(--panel-2);
     border: 1.5px solid var(--teal);
     color: var(--text);
@@ -97,11 +98,54 @@
     font-family: inherit;
     box-sizing: border-box;
     display: block;
-    margin-bottom: 0;
   }
-  .loc-search-input::placeholder { color: var(--text-dim); }
-  .loc-search-input:focus { outline: none; border-color: var(--teal-bright); }
-  .loc-search-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  .loc-ac-input::placeholder { color: var(--text-dim); }
+  .loc-ac-input:focus { outline: none; border-color: var(--teal-bright); box-shadow: 0 0 0 2px rgba(31,138,140,.2); }
+  .loc-ac-icon {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-size: 14px; color: var(--text-dim); pointer-events: none;
+  }
+  .loc-ac-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    max-height: 260px;
+    overflow-y: auto;
+    z-index: 2000;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35);
+    display: none;
+  }
+  .loc-ac-dropdown.open { display: block; }
+  .loc-ac-item {
+    padding: 11px 14px;
+    font-size: 14px;
+    color: var(--text);
+    cursor: pointer;
+    border-bottom: 1px solid var(--line);
+    transition: background .1s;
+  }
+  .loc-ac-item:last-child { border-bottom: none; }
+  .loc-ac-item:hover, .loc-ac-item.highlighted { background: var(--panel-2); color: var(--teal-bright); }
+  .loc-ac-item.highlighted { font-weight: 600; }
+  .loc-ac-empty { padding: 14px; font-size: 13px; color: var(--text-dim); text-align: center; }
+  /* Autocomplete checklist search */
+  .lsearch-wrap { position:relative; flex:1; max-width:400px; }
+  .lsearch-dd {
+    display:none; position:absolute; top:calc(100% + 4px); left:0; right:0;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    max-height:320px; overflow-y:auto; z-index:500;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  .lsearch-dd.open { display:block; }
+  .lsearch-item {
+    padding:10px 14px; font-size:13.5px; color:var(--text);
+    cursor:pointer; border-bottom:1px solid var(--line);
+    transition:background .1s;
+  }
+  .lsearch-item:last-child { border-bottom:none; }
+  .lsearch-item:hover, .lsearch-item.hi { background:var(--panel-2); color:var(--teal-bright); }
+  .lsearch-empty { padding:12px 14px; font-size:13px; color:var(--text-dim); text-align:center; }
   #blockedAlertBanner{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1e2e;border:1px solid var(--bad);color:var(--text);padding:14px 22px;border-radius:12px;font-size:13.5px;z-index:9999;box-shadow:0 4px 24px rgba(0,0,0,.6);max-width:420px;text-align:center;line-height:1.5;}
   @keyframes overduePulse{0%,100%{box-shadow:0 0 0 0 rgba(217,106,90,.55);}50%{box-shadow:0 0 0 5px rgba(217,106,90,0);}}
   .req-photo-thumb{max-width:160px;max-height:160px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;margin-top:8px;object-fit:cover;}
@@ -378,6 +422,9 @@ const LOCATIONS = [
   {name:'Vestiário Feminino',       f:{T1D:2,T2D:2,T1N:1,T2N:1}},
   {name:'Vestiário Masculino',      f:{T1D:2,T2D:2,T1N:1,T2N:1}},
   {name:'Meli Café',                f:{T1D:3,T2D:3,T1N:1,T2N:1}},
+  {name:'Refeitório de Terceiros',  f:{T1D:3,T2D:3,T1N:0,T2N:0}},
+  {name:'CCM',                      f:{T1D:1,T2D:1,T1N:0,T2N:0}},
+  {name:'Sala de Apoio QG',         f:{T1D:1,T2D:1,T1N:0,T2N:0}},
   {name:'Geladeira — Meli Café',           f:{T1D:'wk:0',T2D:'wk:0',T1N:0,T2N:0}}, // 1x/semana aos domingos, T1
   {name:'Geladeira — Staff',               f:{T1D:'wk:0',T2D:'wk:0',T1N:0,T2N:0}}, // 1x/semana aos domingos, T1
   {name:'Geladeira — Refeitório Terceiros',f:{T1D:'wk:0',T2D:'wk:0',T1N:0,T2N:0}}, // 1x/semana aos domingos, T1
@@ -390,7 +437,6 @@ const LOCATIONS = [
   {name:'HS',                       f:{T1D:2,T2D:2,T1N:2,T2N:2}},
   {name:'Portaria',                 f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Setor Segurança',          f:{T1D:1,T2D:1,T1N:1,T2N:1}},
-  {name:'Apoio Motorista',          f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Apoio ao Motorista lado IN',      f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Apoio ao Motorista lado OUT',     f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Apoio ao Motorista Externo',      f:{T1D:1,T2D:1,T1N:1,T2N:1}},
@@ -771,10 +817,11 @@ async function renderDay(){
 
     <!-- lupa / filtro -->
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-      <div style="position:relative;flex:1;max-width:400px;">
-        <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;">🔍</span>
+      <div class="lsearch-wrap">
+        <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;z-index:1;">🔍</span>
         <input type="text" id="locSearch" placeholder="Buscar local..." autocomplete="off"
           style="width:100%;padding:9px 12px 9px 34px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:13.5px;">
+        <div class="lsearch-dd" id="locSearchDD"></div>
       </div>
       <div style="display:flex;gap:8px;font-size:12px;">
         ${currentDate.getDate()%2===0
@@ -858,14 +905,67 @@ async function renderDay(){
     if(elSpan) elSpan.textContent = done+'/'+total;
   });
 
-  // lupa: filtra linhas de local em todos os cards simultaneamente
-  document.getElementById('locSearch').addEventListener('input', (e)=>{
-    const q = e.target.value.toLowerCase().trim();
-    app.querySelectorAll('.loc-row[data-locname]').forEach(row=>{
-      const match = !q || row.getAttribute('data-locname').includes(q);
-      row.style.display = match ? '' : 'none';
+  // lupa: filtra + autocomplete dropdown
+  (function(){
+    const input = document.getElementById('locSearch');
+    const dd = document.getElementById('locSearchDD');
+    if(!input || !dd) return;
+
+    function getLocNames(){
+      const names = new Set();
+      app.querySelectorAll('.loc-row[data-locname]').forEach(r=>names.add(r.getAttribute('data-locname')));
+      return [...names];
+    }
+
+    function filterRows(q){
+      app.querySelectorAll('.loc-row[data-locname]').forEach(row=>{
+        const match = !q || row.getAttribute('data-locname').includes(q);
+        row.style.display = match ? '' : 'none';
+      });
+    }
+
+    function openDD(q){
+      const all = getLocNames();
+      const filtered = q ? all.filter(n=>n.includes(q)) : all;
+      dd.innerHTML = '';
+      if(!filtered.length){
+        dd.innerHTML = '<div class="lsearch-empty">Nenhum ambiente encontrado</div>';
+      } else {
+        // Show max 12 suggestions
+        filtered.forEach(name=>{
+          const div = document.createElement('div');
+          div.className = 'lsearch-item';
+          // Get display name from loc-row
+          const row = app.querySelector(`.loc-row[data-locname="${name}"]`);
+          const displayName = row ? (row.querySelector('.loc-name')?.textContent || name) : name;
+          div.textContent = displayName;
+          div.addEventListener('mousedown', e=>{
+            e.preventDefault();
+            input.value = displayName;
+            filterRows(name);
+            dd.classList.remove('open');
+            // Scroll to first match
+            const target = app.querySelector('.loc-row[data-locname="'+name+'"]');
+            if(target) target.scrollIntoView({behavior:'smooth', block:'center'});
+          });
+          dd.appendChild(div);
+        });
+      }
+      dd.classList.add('open');
+    }
+
+    input.addEventListener('focus', ()=>{ openDD(input.value.toLowerCase().trim()); });
+    input.addEventListener('input', ()=>{
+      const q = input.value.toLowerCase().trim();
+      filterRows(q);
+      openDD(q);
     });
-  });
+    input.addEventListener('blur', ()=>{ setTimeout(()=>dd.classList.remove('open'), 200); });
+    input.addEventListener('keydown', e=>{
+      if(e.key==='Escape'){ input.value=''; filterRows(''); dd.classList.remove('open'); }
+    });
+    document.addEventListener('click', e=>{ if(!input.contains(e.target)&&!dd.contains(e.target)) dd.classList.remove('open'); });
+  })();
 
   // clique nas ocorrências
   app.querySelectorAll('.occ').forEach(el=>{
@@ -1045,6 +1145,7 @@ function reqCardHtml(r, showActions){
     </div>` : '';
 
   const fotoHtml = r.foto ? `<img src="${r.foto}" class="req-photo-thumb" alt="Foto da solicitação" title="Foto da solicitação (clique para ampliar)">` : '';
+  const tipoHtml = r.tipo ? `<span class="badge" style="background:rgba(63,214,201,.12);color:var(--teal-bright);margin-right:4px;">📋 ${r.tipo}</span>` : '';
   const evidenciaHtml = r.evidencia ? `
     <div style="margin-top:10px;">
       <div style="font-size:11px;color:var(--ok);font-weight:700;margin-bottom:4px;">📷 Evidência de conclusão</div>
@@ -1056,6 +1157,7 @@ function reqCardHtml(r, showActions){
       <div>
         <div class="req-id">#${r.id}</div>
         <div class="req-local">${r.local}</div>
+        ${tipoHtml}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">${statusBadge(r.status)}${prioBadge(r.prio)}</div>
     </div>
@@ -1211,9 +1313,26 @@ async function renderRequests(){
     content.innerHTML = `
       <div class="card" style="max-width:560px;">
         <div class="form-row"><label>Seu nome</label><input type="text" id="reqNome" placeholder="Ex: João Silva"></div>
-        <div class="form-row"><label>Local</label><select id="reqLocal">${optionsHtml}</select></div>
-        <div class="form-row" id="reqLocalOutroWrap" style="display:none;">
-          <label>Especifique o local</label><input type="text" id="reqLocalOutro" placeholder="Nome do local">
+        <div class="form-row">
+          <label>Local</label>
+          <div class="lsearch-wrap" style="max-width:100%;">
+            <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;z-index:1;">🔍</span>
+            <input type="text" id="reqLocalSearch" placeholder="Buscar local..." autocomplete="off"
+              style="width:100%;padding:9px 12px 9px 34px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:13.5px;">
+            <div class="lsearch-dd" id="reqLocalDD"></div>
+          </div>
+          <input type="hidden" id="reqLocal" value="${LOCATION_NAMES[0]}">
+        </div>
+        <div class="form-row"><label>Tipo de Ocorrência <span style="color:var(--bad);">*</span></label>
+          <select id="reqTipo">
+            <option value="">— Selecione —</option>
+            <option value="Produtos rombidos/estourados">Produtos rombidos/estourados</option>
+            <option value="Limpeza geral">Limpeza geral</option>
+            <option value="Reposição de copos">Reposição de copos</option>
+            <option value="Reposição de papel higiênico">Reposição de papel higiênico</option>
+            <option value="Reposição de papel toalha">Reposição de papel toalha</option>
+            <option value="Outros">Outros</option>
+          </select>
         </div>
         <div class="form-row"><label>Descreva a solicitação</label>
           <textarea id="reqDesc" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
@@ -1227,7 +1346,66 @@ async function renderRequests(){
         <div id="reqResult"></div>
       </div>`;
     let reqFotoDataUrl = null;
-    makeSearchableSelect('reqLocal');
+
+  // Autocomplete local — mesmo comportamento do "Buscar Local" do checklist
+  (function(){
+    const input = document.getElementById('reqLocalSearch');
+    const dd = document.getElementById('reqLocalDD');
+    const hidden = document.getElementById('reqLocal');
+    if(!input||!dd||!hidden) return;
+
+    const allItems = LOCATION_NAMES.map(n=>({value:n, text:n}));
+
+    function getFiltered(q){
+      return q ? allItems.filter(i=>i.text.toLowerCase().includes(q.toLowerCase())) : allItems;
+    }
+
+    function openDD(q){
+      const filtered = getFiltered(q);
+      dd.innerHTML = '';
+      if(!filtered.length){
+        dd.innerHTML = '<div class="lsearch-empty">Nenhum ambiente encontrado</div>';
+      } else {
+        filtered.forEach(item=>{
+          const div = document.createElement('div');
+          div.className = 'lsearch-item';
+          div.textContent = item.text;
+          div.addEventListener('mousedown', e=>{
+            e.preventDefault();
+            input.value = item.text;
+            hidden.value = item.value;
+            dd.classList.remove('open');
+          });
+          div.addEventListener('touchend', e=>{
+            e.preventDefault();
+            input.value = item.text;
+            hidden.value = item.value;
+            dd.classList.remove('open');
+          });
+          dd.appendChild(div);
+        });
+      }
+      dd.classList.add('open');
+    }
+
+    input.addEventListener('focus', ()=>{ input.select(); openDD(input.value); });
+    input.addEventListener('input', ()=>{ openDD(input.value); if(getFiltered(input.value).length===1){ hidden.value=getFiltered(input.value)[0].value; } });
+    input.addEventListener('blur',  ()=>{ setTimeout(()=>dd.classList.remove('open'), 200); });
+    input.addEventListener('keydown', e=>{
+      if(e.key==='Escape'){ input.value=''; openDD(''); }
+      if(e.key==='Enter'){
+        const f=getFiltered(input.value);
+        if(f.length>=1){ input.value=f[0].text; hidden.value=f[0].value; dd.classList.remove('open'); }
+        e.preventDefault();
+      }
+    });
+    document.addEventListener('click', e=>{ if(!input.contains(e.target)&&!dd.contains(e.target)) dd.classList.remove('open'); });
+
+    // Set initial value display
+    input.value = allItems[0]?.text || '';
+    hidden.value = allItems[0]?.value || '';
+  })();
+
   document.getElementById('reqFoto').addEventListener('change', async (e)=>{
       const file = e.target.files[0];
       const previewEl = document.getElementById('reqFotoPreview');
@@ -1242,25 +1420,24 @@ async function renderRequests(){
         previewEl.innerHTML = '<span style="font-size:12.5px;color:var(--bad);">Não foi possível processar essa foto. Tente outra.</span>';
       }
     });
-    document.getElementById('reqLocal').addEventListener('change', (e)=>{
-      document.getElementById('reqLocalOutroWrap').style.display = e.target.value==='Outro / não listado'?'flex':'none';
-    });
+
     document.getElementById('reqSubmit').addEventListener('click', async ()=>{
       const nome = document.getElementById('reqNome').value.trim();
       let local = document.getElementById('reqLocal').value;
       const outroEl = document.getElementById('reqLocalOutro');
       if(local==='Outro / não listado' && outroEl && outroEl.value.trim()) local=outroEl.value.trim();
+      const tipo = document.getElementById('reqTipo').value;
       const desc = document.getElementById('reqDesc').value.trim();
       const prio = document.getElementById('reqPrio').value;
       const resultEl = document.getElementById('reqResult');
 
-      if(!nome||!desc){
-        resultEl.innerHTML=`<p style="color:var(--bad);font-size:13px;margin-top:10px;">Preencha seu nome e a descrição.</p>`;
+      if(!nome||!desc||!tipo){
+        resultEl.innerHTML=`<p style="color:var(--bad);font-size:13px;margin-top:10px;">Preencha seu nome, tipo de ocorrência e a descrição.</p>`;
         return;
       }
 
       const id=genTicketId(), now=Date.now();
-      const obj={id,nome,local,desc,prio,status:'aberta',createdAt:now,updatedAt:now,foto:reqFotoDataUrl||null};
+      const obj={id,nome,local,tipo,desc,prio,status:'aberta',createdAt:now,updatedAt:now,foto:reqFotoDataUrl||null};
       await saveRequest(id, obj);
 
       // vai direto pro painel
@@ -1688,6 +1865,7 @@ async function renderReportRequests(){
     return `<tr style="${bg}">
       <td style="white-space:nowrap;"><span class="req-id">#${r.id}</span></td>
       <td>${r.local}</td>
+      <td>${r.tipo||'—'}</td>
       <td>${r.nome}</td>
       <td>${r.prio==='alta'?'<span class="badge prio-alta">Urgente</span>':'<span class="badge prio-normal">Normal</span>'}</td>
       <td>${r.assignee||r.closedBy||'<span style="color:var(--text-dim)">—</span>'}</td>
@@ -1697,7 +1875,7 @@ async function renderReportRequests(){
     </tr>`;
   }
   const tableHead=`<div class="tablewrap"><table class="report-table"><thead><tr>
-    <th>Código</th><th>Local</th><th>Solicitante</th><th>Prioridade</th><th>Responsável</th><th>Status</th><th>Registrada em</th><th>Concluída em</th>
+    <th>Código</th><th>Local</th><th>Tipo</th><th>Solicitante</th><th>Prioridade</th><th>Responsável</th><th>Status</th><th>Registrada em</th><th>Concluída em</th>
   </tr></thead><tbody>`;
 
   let html=`
@@ -1811,40 +1989,113 @@ function makeSearchableSelect(selectId){
   const sel = document.getElementById(selectId);
   if(!sel || sel._searchable) return;
   sel._searchable = true;
+  sel.style.display = 'none';
 
-  // Wrapper
+  const allItems = Array.from(sel.options).map(o=>({value:o.value, text:o.text}));
+
+  // Build wrapper
   const wrap = document.createElement('div');
-  wrap.className = 'loc-search-wrap';
+  wrap.className = 'loc-ac-wrap';
   sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
 
-  // Search input com classe CSS estática (funciona em qualquer tema)
+  // Input
   const input = document.createElement('input');
   input.type = 'text';
   input.autocomplete = 'off';
   input.spellcheck = false;
   input.placeholder = '🔍  Buscar local...';
-  input.className = 'loc-search-input';
-  wrap.appendChild(input);
+  input.className = 'loc-ac-input';
+  const curOpt = allItems.find(i=>i.value===sel.value);
+  if(curOpt) input.value = curOpt.text;
+  wrap.insertBefore(input, sel);
 
-  // Move select para dentro do wrap
-  wrap.appendChild(sel);
+  // Chevron
+  const icon = document.createElement('span');
+  icon.className = 'loc-ac-icon';
+  icon.textContent = '⌄';
+  wrap.insertBefore(icon, sel);
 
-  const allOptions = Array.from(sel.options);
+  // Dropdown
+  const dd = document.createElement('div');
+  dd.className = 'loc-ac-dropdown';
+  wrap.insertBefore(dd, sel);
 
-  input.addEventListener('input', ()=>{
-    const q = input.value.toLowerCase().trim();
-    let firstMatch = null;
-    allOptions.forEach(opt=>{
-      const visible = !q || opt.text.toLowerCase().includes(q);
-      opt.style.display = visible ? '' : 'none';
-      if(visible && !firstMatch) firstMatch = opt;
+  let hi = -1;
+
+  function getFiltered(q){
+    return q ? allItems.filter(i=>i.text.toLowerCase().includes(q.toLowerCase())) : allItems;
+  }
+
+  function renderDD(q){
+    const f = getFiltered(q);
+    hi = f.length===1 ? 0 : -1;
+    dd.innerHTML = '';
+    if(!f.length){
+      dd.innerHTML = '<div class="loc-ac-empty">Nenhum ambiente encontrado</div>';
+      return;
+    }
+    f.forEach((item,idx)=>{
+      const div = document.createElement('div');
+      div.className = 'loc-ac-item' + (idx===hi?' highlighted':'');
+      div.textContent = item.text;
+      div.addEventListener('mousedown', e=>{
+        e.preventDefault();
+        pickItem(item);
+      });
+      // Touch support
+      div.addEventListener('touchend', e=>{
+        e.preventDefault();
+        pickItem(item);
+      });
+      dd.appendChild(div);
     });
-    if(firstMatch && q) sel.value = firstMatch.value;
-  });
+  }
+
+  function pickItem(item){
+    sel.value = item.value;
+    input.value = item.text;
+    dd.classList.remove('open');
+    icon.textContent = '⌄';
+    sel.dispatchEvent(new Event('change', {bubbles:true}));
+    input.blur();
+  }
+
+  function openDD(){
+    renderDD(input.value);
+    dd.classList.add('open');
+    icon.textContent = '⌃';
+  }
+
+  function closeDD(){
+    dd.classList.remove('open');
+    icon.textContent = '⌄';
+    // Restore label
+    const cur = allItems.find(i=>i.value===sel.value);
+    if(cur) input.value = cur.text;
+  }
+
+  input.addEventListener('focus', ()=>{ input.select(); openDD(); });
+  input.addEventListener('input', ()=>{ openDD(); const f=getFiltered(input.value); if(f.length===1) sel.value=f[0].value; });
+  input.addEventListener('blur',  ()=>{ setTimeout(closeDD, 250); });
 
   input.addEventListener('keydown', e=>{
-    if(e.key==='Escape'){ input.value=''; allOptions.forEach(o=>o.style.display=''); }
+    const f = getFiltered(input.value);
+    if(e.key==='ArrowDown'){ e.preventDefault(); hi=Math.min(hi+1,f.length-1); updateHi(f); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); hi=Math.max(hi-1,0); updateHi(f); }
+    else if(e.key==='Enter'){ e.preventDefault(); if(hi>=0&&f[hi]) pickItem(f[hi]); else if(f.length===1) pickItem(f[0]); }
+    else if(e.key==='Escape'){ input.value=''; openDD(); }
   });
+
+  function updateHi(f){
+    dd.querySelectorAll('.loc-ac-item').forEach((el,i)=>{
+      el.classList.toggle('highlighted', i===hi);
+      if(i===hi) el.scrollIntoView({block:'nearest'});
+    });
+    if(hi>=0&&f[hi]) sel.value=f[hi].value;
+  }
+
+  document.addEventListener('click', e=>{ if(!wrap.contains(e.target)) closeDD(); });
 }
 
 
@@ -1915,6 +2166,17 @@ async function renderKiosk(){
       <div class="card">
         <div class="form-row"><label>Seu nome</label><input type="text" id="kNome" placeholder="Ex: João Silva"></div>
         <div class="form-row"><label>Local</label><select id="kLocal">${optionsHtml}</select></div>
+        <div class="form-row"><label>Tipo de Ocorrência <span style="color:var(--bad);">*</span></label>
+          <select id="kTipo">
+            <option value="">— Selecione —</option>
+            <option value="Produtos rombidos/estourados">Produtos rombidos/estourados</option>
+            <option value="Limpeza geral">Limpeza geral</option>
+            <option value="Reposição de copos">Reposição de copos</option>
+            <option value="Reposição de papel higiênico">Reposição de papel higiênico</option>
+            <option value="Reposição de papel toalha">Reposição de papel toalha</option>
+            <option value="Outros">Outros</option>
+          </select>
+        </div>
         <div class="form-row"><label>Descreva a solicitação</label><textarea id="kDesc" rows="3" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
         <div class="form-row"><label>Foto (opcional)</label><input type="file" id="kFoto" accept="image/*" capture="environment"></div>
         <div class="form-row"><label>Prioridade</label>
@@ -1958,7 +2220,6 @@ async function renderKiosk(){
   `;
 
   let reqFotoDataUrl = null;
-  makeSearchableSelect('kLocal');
   document.getElementById('kFoto').addEventListener('change', async (e)=>{
     const file = e.target.files[0];
     if(!file){ reqFotoDataUrl=null; return; }
@@ -1969,11 +2230,13 @@ async function renderKiosk(){
   document.getElementById('kSubmit').addEventListener('click', async ()=>{
     const nome  = document.getElementById('kNome').value.trim();
     const local = document.getElementById('kLocal').value;
+    const tipo  = document.getElementById('kTipo').value;
     const desc  = document.getElementById('kDesc').value.trim();
     const prio  = document.getElementById('kPrio').value;
     const errEl = document.getElementById('kError');
 
     if(!nome){ errEl.textContent='Informe seu nome.'; return; }
+    if(!tipo){ errEl.textContent='Selecione o tipo de ocorrência.'; return; }
     if(!desc){ errEl.textContent='Descreva a solicitação.'; return; }
     errEl.textContent='';
 
@@ -1982,7 +2245,7 @@ async function renderKiosk(){
 
     const now = Date.now();
     const id = now.toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
-    const obj = {id, nome, local, desc, prio, status:'aberta', createdAt:now, updatedAt:now, foto:reqFotoDataUrl||null};
+    const obj = {id, nome, local, tipo, desc, prio, status:'aberta', createdAt:now, updatedAt:now, foto:reqFotoDataUrl||null};
     await saveRequest(id, obj);
 
     document.getElementById('kPanelNew').style.display='none';
