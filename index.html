@@ -53,7 +53,8 @@
   body.kiosk .wrap { max-width:100% !important; width:100% !important; padding:0 !important; margin:0 !important; }
   body.kiosk #app { width:100% !important; max-width:100% !important; padding:16px !important; margin:0 !important; }
   body.kiosk .topbar, body.kiosk .mainnav { display:none !important; }
-  body.kiosk input, body.kiosk select, body.kiosk textarea { font-size:16px !important; padding:14px 12px !important; width:100% !important; }
+  body.kiosk input:not(.loc-ac-input):not([type=hidden]):not(#kLocalSearch):not(#reqLocalSearch), body.kiosk select, body.kiosk textarea { font-size:16px !important; padding:14px 12px !important; width:100% !important; }
+  body.kiosk #kLocalSearch, body.kiosk #reqLocalSearch { font-size:16px !important; padding:12px 12px 12px 38px !important; width:100% !important; }
   body.kiosk label { font-size:15px !important; margin-bottom:6px !important; display:block; }
   body.kiosk .btn { font-size:16px !important; padding:16px !important; width:100% !important; }
   body.kiosk .card { border-radius:12px; margin:0; overflow:visible; }
@@ -1318,7 +1319,7 @@ async function renderRequests(){
         <div class="form-row"><label>Seu nome</label><input type="text" id="reqNome" placeholder="Ex: João Silva"></div>
         <div class="form-row">
           <label>Local</label>
-          <div class="lsearch-wrap" style="max-width:100%;">
+          <div class="lsearch-wrap" style="max-width:100%;width:100%;position:relative;">
             <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;z-index:1;">🔍</span>
             <input type="text" id="reqLocalSearch" placeholder="Buscar local..." autocomplete="off"
               style="width:100%;padding:9px 12px 9px 34px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:13.5px;">
@@ -2170,8 +2171,8 @@ async function renderKiosk(){
         <div class="form-row"><label>Seu nome</label><input type="text" id="kNome" placeholder="Ex: João Silva"></div>
         <div class="form-row">
           <label>Local</label>
-          <div class="lsearch-wrap" style="max-width:100%;">
-            <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;z-index:1;">🔍</span>
+          <div class="lsearch-wrap" style="max-width:100%;width:100%;position:relative;">
+            <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;color:var(--text-dim);pointer-events:none;z-index:2;">🔍</span>
             <input type="text" id="kLocalSearch" placeholder="Buscar local..." autocomplete="off"
               style="width:100%;padding:9px 12px 9px 34px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:13.5px;">
             <div class="lsearch-dd" id="kLocalDD"></div>
