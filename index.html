@@ -2165,7 +2165,16 @@ async function renderKiosk(){
     <div id="kPanelNew">
       <div class="card">
         <div class="form-row"><label>Seu nome</label><input type="text" id="kNome" placeholder="Ex: João Silva"></div>
-        <div class="form-row"><label>Local</label><select id="kLocal">${optionsHtml}</select></div>
+        <div class="form-row">
+          <label>Local</label>
+          <div class="lsearch-wrap" style="max-width:100%;">
+            <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;z-index:1;">🔍</span>
+            <input type="text" id="kLocalSearch" placeholder="Buscar local..." autocomplete="off"
+              style="width:100%;padding:9px 12px 9px 34px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:13.5px;">
+            <div class="lsearch-dd" id="kLocalDD"></div>
+          </div>
+          <input type="hidden" id="kLocal" value="${LOCATION_NAMES[0]}">
+        </div>
         <div class="form-row"><label>Tipo de Ocorrência <span style="color:var(--bad);">*</span></label>
           <select id="kTipo">
             <option value="">— Selecione —</option>
@@ -2220,6 +2229,31 @@ async function renderKiosk(){
   `;
 
   let reqFotoDataUrl = null;
+
+  // Autocomplete Local — mesmo componente do checklist e do formulário principal
+  (function(){
+    const input = document.getElementById('kLocalSearch');
+    const dd    = document.getElementById('kLocalDD');
+    const hidden= document.getElementById('kLocal');
+    if(!input||!dd||!hidden) return;
+    const allItems = LOCATION_NAMES.map(n=>({value:n, text:n}));
+    function getFiltered(q){ return q ? allItems.filter(i=>i.text.toLowerCase().includes(q.toLowerCase())) : allItems; }
+    function openDD(q){
+      const filtered = getFiltered(q);
+      dd.innerHTML = '';
+      if(!filtered.length){ dd.innerHTML='<div class="lsearch-empty">Nenhum ambiente encontrado</div>'; }
+      else { filtered.forEach(item=>{ const div=document.createElement('div'); div.className='lsearch-item'; div.textContent=item.text; div.addEventListener('mousedown',e=>{ e.preventDefault(); input.value=item.text; hidden.value=item.value; dd.classList.remove('open'); }); div.addEventListener('touchend',e=>{ e.preventDefault(); input.value=item.text; hidden.value=item.value; dd.classList.remove('open'); }); dd.appendChild(div); }); }
+      dd.classList.add('open');
+    }
+    input.addEventListener('focus', ()=>{ input.select(); openDD(input.value); });
+    input.addEventListener('input', ()=>{ openDD(input.value); if(getFiltered(input.value).length===1) hidden.value=getFiltered(input.value)[0].value; });
+    input.addEventListener('blur',  ()=>{ setTimeout(()=>dd.classList.remove('open'), 200); });
+    input.addEventListener('keydown', e=>{ if(e.key==='Escape'){ input.value=''; openDD(''); } if(e.key==='Enter'){ const f=getFiltered(input.value); if(f.length>=1){ input.value=f[0].text; hidden.value=f[0].value; dd.classList.remove('open'); } e.preventDefault(); } });
+    document.addEventListener('click', e=>{ if(!input.contains(e.target)&&!dd.contains(e.target)) dd.classList.remove('open'); });
+    input.value = allItems[0]?.text || '';
+    hidden.value = allItems[0]?.value || '';
+  })();
+
   document.getElementById('kFoto').addEventListener('change', async (e)=>{
     const file = e.target.files[0];
     if(!file){ reqFotoDataUrl=null; return; }
