@@ -657,23 +657,27 @@ function isOverdue(loc, turnKey, idx, date, state){
   if((dayPar && colParity!=='par') || (!dayPar && colParity!=='impar')) return false; // coluna não roda neste dia
   const deadline = occDeadline(loc, turnKey, idx, date);
   if(!deadline) return false;
-  return Date.now() > deadline.getTime();
+  const nowBRT2 = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  return nowBRT2 > deadline.getTime();
 }
 // Retorna true se o local é banheiro (frequência 6 por turno)
 function isBathroomLoc(loc){
   return Object.values(loc.f).some(v => v === 6);
 }
 // Retorna true se o turno está fora do horário atual
-// T1D/T2D (diurno) = 06:00-18:00 | T1N/T2N (noturno) = 18:00-06:00
+// T1D/T2D = Par, T1N/T2N = Ímpar
+// Dentro do turno: T*D (diurno) = 06:00-18:00 | T*N (noturno) = 18:00-06:00
 function isTurnBlocked(turnKey){
   if(isAdmin) return false;
-  const h = new Date().getHours();
-  const isDiurno = h >= 6 && h < 18;
-  const isNoturno = !isDiurno;
-  const turnIsDiurno = turnKey === 'T1D' || turnKey === 'T2D';
+  // Usa fuso de Brasília (UTC-3) para garantir horário correto independente do dispositivo
+  const nowBRT = new Date(new Date().toLocaleString('en-US', {timeZone:'America/Sao_Paulo'}));
+  const h = nowBRT.getHours();
+  const isDiurnoAgora = h >= 6 && h < 18;
+  // D = diurno (06-18h), N = noturno (18-06h)
+  const turnIsDiurno  = turnKey === 'T1D' || turnKey === 'T2D';
   const turnIsNoturno = turnKey === 'T1N' || turnKey === 'T2N';
-  if(turnIsDiurno && isNoturno) return true;  // T1/T2 diurno bloqueado à noite
-  if(turnIsNoturno && isDiurno) return true;  // T1/T2 noturno bloqueado de dia
+  if(turnIsDiurno  && !isDiurnoAgora) return true;  // turno diurno bloqueado à noite
+  if(turnIsNoturno &&  isDiurnoAgora) return true;  // turno noturno bloqueado de dia
   return false;
 }
 // banheiros fora da janela de ±2h do deadline (muito cedo OU muito tarde)
@@ -684,10 +688,10 @@ function isBlockedLate(loc, turnKey, idx, date, state){
   if(isAdmin) return false; // admin ignora restrição
   const deadline = occDeadline(loc, turnKey, idx, date);
   if(!deadline) return false;
-  const now = Date.now();
+  const nowBRT = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
   const dl = deadline.getTime();
-  const tooEarly = now < dl - 2 * 60 * 60 * 1000; // mais de 2h antes
-  const tooLate  = now > dl + 2 * 60 * 60 * 1000; // mais de 2h depois
+  const tooEarly = nowBRT < dl - 2 * 60 * 60 * 1000; // mais de 2h antes
+  const tooLate  = nowBRT > dl + 2 * 60 * 60 * 1000; // mais de 2h depois
   return tooEarly || tooLate;
 }
 
