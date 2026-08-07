@@ -539,20 +539,19 @@ async function tryAdminLogin(){
 function adminLogout(){
   isAdmin = false;
   try{ window.storage.delete('adminSession', false); }catch(e){}
+  // Restaura botão do menu
+  const nav = document.getElementById('navAdmin');
+  if(nav){ nav.textContent = '🔑 Admin'; nav.classList.remove('active'); }
   renderTopControls();
   renderChecklist();
 }
 function showAdminBadge(){
-  let b = document.getElementById('adminBadge');
-  if(!b){
-    b = document.createElement('div');
-    b.id = 'adminBadge';
-    b.style.cssText = 'position:fixed;top:0;right:0;background:#e3b341;color:#000;font-size:11px;font-weight:700;padding:3px 10px;border-radius:0 0 0 8px;z-index:9997;cursor:pointer;letter-spacing:.3px;';
-    b.textContent = '🔑 ADMIN — Sair';
-    b.addEventListener('click', ()=>{ if(confirm('Sair do modo administrador?')) adminLogout(); });
-    document.body.appendChild(b);
-  }
-  b.style.display = 'block';
+  // Atualiza o botão do menu
+  const nav = document.getElementById('navAdmin');
+  if(nav){ nav.textContent = '🔑 ADMIN — Sair'; nav.classList.add('active'); }
+  // Remove badge antigo se existir
+  const old = document.getElementById('adminBadge');
+  if(old) old.remove();
 }
 
 async function loadEmployee(){
