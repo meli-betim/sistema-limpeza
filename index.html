@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://www.gstatic.com">
+<link rel="preconnect" href="https://sistema-de-limpeza-betim-default-rtdb.firebaseio.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="dns-prefetch" href="https://www.gstatic.com">
+<link rel="dns-prefetch" href="https://firebaseio.com">
 <title>Sistema de Limpeza — Mercado Livre Betim</title>
 <style>
   :root{
@@ -150,6 +155,19 @@
   .lsearch-item:last-child { border-bottom:none; }
   .lsearch-item:hover, .lsearch-item.hi { background:var(--panel-2); color:var(--teal-bright); }
   .lsearch-empty { padding:12px 14px; font-size:13px; color:var(--text-dim); text-align:center; }
+  /* Modo checklist mobile */
+  body.checklist-mode .topbar { height:56px; padding:0 16px; }
+  body.checklist-mode .topbar h1 { font-size:14px; }
+  body.checklist-mode .topbar .sub { display:none; }
+  body.checklist-mode .mainnav { display:none !important; }
+  body.checklist-mode .wrap { padding:12px 12px 60px; }
+  body.checklist-mode .turn-head { padding:10px 14px; }
+  body.checklist-mode .turn-head .tname { font-size:13px; }
+  body.checklist-mode .loc-row { padding:10px 14px; }
+  body.checklist-mode .loc-name { font-size:13px; }
+  body.checklist-mode .occ { width:40px; height:40px; font-size:14px; }
+  body.checklist-mode .occ-time { font-size:10px; }
+  body.checklist-mode .turn-grid { grid-template-columns:1fr; gap:12px; }
   #blockedAlertBanner{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1e2e;border:1px solid var(--bad);color:var(--text);padding:14px 22px;border-radius:12px;font-size:13.5px;z-index:9999;box-shadow:0 4px 24px rgba(0,0,0,.6);max-width:420px;text-align:center;line-height:1.5;}
   @keyframes overduePulse{0%,100%{box-shadow:0 0 0 0 rgba(217,106,90,.55);}50%{box-shadow:0 0 0 5px rgba(217,106,90,0);}}
   .req-photo-thumb{max-width:160px;max-height:160px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;margin-top:8px;object-fit:cover;}
@@ -254,6 +272,11 @@
 </style>
 </head>
 <body>
+<div id="loadingOverlay" style="position:fixed;inset:0;background:var(--bg, #0f1b1c);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;transition:opacity .3s;">
+  <div style="width:48px;height:48px;border:3px solid rgba(31,138,140,.2);border-top-color:#1f8a8c;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:16px;"></div>
+  <div style="font-size:13px;color:#8fb0ae;font-family:sans-serif;">Carregando sistema...</div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
 <div class="topbar">
   <div>
@@ -490,7 +513,7 @@ let currentDate = new Date();
 let dayCache = {};
 let currentEmployee = '';
 let isAdmin = false; // modo administrador
-const ADMIN_HASH = '52e449f74a97da511646fab7bee2f7ae4bb1367b2207b5f3e6e690c53cd91974'; // Meli@2027
+const ADMIN_HASH = '6cc963feb1c1187e040f1a5806d4a8b4ffa6f4cf9153c3f3457a5859edd01b3d'; // Meli@2027
 
 // SHA-256 simples para validar senha sem expor em texto puro
 async function hashPassword(str){
@@ -506,7 +529,8 @@ async function tryAdminLogin(){
     try{ await window.storage.set('adminSession', Date.now().toString(), false); }catch(e){}
     showAdminBadge();
     renderTopControls();
-    renderChecklist();
+    if(section === 'requests') renderRequests();
+    else renderChecklist();
     alert('✅ Modo administrador ativado!');
   } else {
     alert('❌ Senha incorreta.');
@@ -639,14 +663,32 @@ function isOverdue(loc, turnKey, idx, date, state){
 function isBathroomLoc(loc){
   return Object.values(loc.f).some(v => v === 6);
 }
-// Retorna true se a célula está bloqueada para lançamento retroativo:
-// banheiros com mais de 2h além do deadline e ainda pendentes
+// Retorna true se o turno está fora do horário atual
+// T1D/T2D (diurno) = 06:00-18:00 | T1N/T2N (noturno) = 18:00-06:00
+function isTurnBlocked(turnKey){
+  if(isAdmin) return false;
+  const h = new Date().getHours();
+  const isDiurno = h >= 6 && h < 18;
+  const isNoturno = !isDiurno;
+  const turnIsDiurno = turnKey === 'T1D' || turnKey === 'T2D';
+  const turnIsNoturno = turnKey === 'T1N' || turnKey === 'T2N';
+  if(turnIsDiurno && isNoturno) return true;  // T1/T2 diurno bloqueado à noite
+  if(turnIsNoturno && isDiurno) return true;  // T1/T2 noturno bloqueado de dia
+  return false;
+}
+// banheiros fora da janela de ±2h do deadline (muito cedo OU muito tarde)
+// Admin ignora o bloqueio
 function isBlockedLate(loc, turnKey, idx, date, state){
   if(state !== 'pending') return false; // já marcado — não bloqueia
   if(!isBathroomLoc(loc)) return false; // só banheiros
+  if(isAdmin) return false; // admin ignora restrição
   const deadline = occDeadline(loc, turnKey, idx, date);
   if(!deadline) return false;
-  return Date.now() > deadline.getTime() + 2 * 60 * 60 * 1000; // 2h além do prazo
+  const now = Date.now();
+  const dl = deadline.getTime();
+  const tooEarly = now < dl - 2 * 60 * 60 * 1000; // mais de 2h antes
+  const tooLate  = now > dl + 2 * 60 * 60 * 1000; // mais de 2h depois
+  return tooEarly || tooLate;
 }
 
 /* ===================== FOTO ANEXADA NAS SOLICITAÇÕES =====================
@@ -767,19 +809,29 @@ function renderTopControls(){
   }
 }
 
-function showBlockedAlert(){
+function showBlockedAlert(type, availableAt){
   let el = document.getElementById('blockedAlertBanner');
   if(!el){
     el = document.createElement('div');
     el.id = 'blockedAlertBanner';
-    el.innerHTML = '⏱ <strong>Prazo encerrado.</strong><br>O prazo máximo para lançar esta limpeza é de até <strong>2 horas</strong> após o horário planejado. A ocorrência foi contabilizada como <strong>não realizada</strong>.';
     document.body.appendChild(el);
+  }
+  if(type === 'turn'){
+    el.innerHTML = `🕐 <strong>Fora do horário do turno.</strong><br>Este turno só pode ser registrado a partir das <strong>${availableAt}</strong>.`;
+  } else if(type === 'early'){
+    el.innerHTML = `⏳ <strong>Ainda não está no horário.</strong><br>Esta limpeza só pode ser registrada a partir das <strong>${availableAt}</strong>.`;
+  } else {
+    el.innerHTML = '⏱ <strong>Prazo encerrado.</strong><br>O prazo máximo para lançar esta limpeza é de até <strong>2 horas</strong> após o horário planejado. A ocorrência foi contabilizada como <strong>não realizada</strong>.';
   }
   el.style.display = 'block';
   clearTimeout(el._t);
   el._t = setTimeout(()=>{ el.style.display='none'; }, 4000);
 }
 
+function hideLoader(){
+  const ol = document.getElementById('loadingOverlay');
+  if(ol){ ol.style.opacity='0'; setTimeout(()=>ol.remove(), 300); }
+}
 async function renderChecklist(){
   if(mode==='day') await renderDay(); else await renderWeek();
 }
@@ -854,14 +906,25 @@ async function renderDay(){
         const entry = getEntry(data,k);
         const st = entry.state || 'pending';
         const overdue = isOverdue(loc, t.key, i, currentDate, st);
-        const blocked = isBlockedLate(loc, t.key, i, currentDate, st);
+        const blocked = isBlockedLate(loc, t.key, i, currentDate, st) || (st==='pending' && isTurnBlocked(t.key));
         const cls = blocked ? 'overdue blocked-late' : overdue ? 'overdue' : st;
         let title = 'Pendente';
         if(entry.ts){
           title = (st==='done'?'Concluído':'Não realizado')+' em '+fmtBR(new Date(entry.ts))+' '+fmtTime(entry.ts);
           if(entry.emp) title += ' — '+entry.emp;
+        } else if(st==='pending' && isTurnBlocked(t.key)){
+          const isDiurno = t.key==='T1D'||t.key==='T2D';
+          title = isDiurno
+            ? 'Turno diurno — disponível das 06:00 às 18:00'
+            : 'Turno noturno — disponível das 18:00 às 06:00';
         } else if(blocked){
-          title = 'Prazo encerrado — lançamento não permitido após 2h do horário planejado';
+          const dl = occDeadline(loc, t.key, i, currentDate);
+          const now = Date.now();
+          const dlMs = dl ? dl.getTime() : 0;
+          const tooEarly = now < dlMs - 2*3600000;
+          title = tooEarly
+            ? `Disponível a partir das ${fmtTime(dlMs - 2*3600000)} — aguarde o horário`
+            : 'Prazo encerrado — lançamento não permitido após 2h do horário planejado';
         } else if(overdue){
           const dl = occDeadline(loc, t.key, i, currentDate);
           title = 'Atrasado — deveria ter sido feito até '+fmtTime(dl.getTime());
@@ -976,7 +1039,23 @@ async function renderDay(){
     el.addEventListener('click', async ()=>{
       // Bloqueia lançamento retroativo para banheiros após 2h do prazo (admin pode ignorar)
       if(el.getAttribute('data-blocked')==='true' && !isAdmin){
-        showBlockedAlert();
+        const key = el.getAttribute('data-key');
+        const parts = key.split('|');
+        const locName = parts[0];
+        const turnKey = parts[1];
+        const idx = parseInt(parts[2]);
+
+        // Bloqueio de turno
+        if(isTurnBlocked(turnKey)){
+          const isDiurno = turnKey==='T1D'||turnKey==='T2D';
+          showBlockedAlert('turn', isDiurno ? '06:00' : '18:00');
+          return;
+        }
+
+        const loc = LOCATIONS.find(l=>l.name===locName);
+        const dl = loc ? occDeadline(loc, turnKey, idx, currentDate) : null;
+        const tooEarly = dl && Date.now() < dl.getTime() - 2*3600000;
+        showBlockedAlert(tooEarly ? 'early' : 'late', dl ? fmtTime(dl.getTime() - 2*3600000) : '');
         return;
       }
       const k = el.getAttribute('data-key');
@@ -1125,6 +1204,7 @@ async function deleteRequest(id){
 
 function statusBadge(status){
   if(status==='concluida') return '<span class="badge concluida">Concluída ✓</span>';
+  if(status==='excluida')  return '<span class="badge excluida">Excluída</span>';
   if(status==='andamento') return '<span class="badge andamento">Em andamento</span>';
   return '<span class="badge aberta">Pendente</span>';
 }
@@ -1146,6 +1226,9 @@ function reqCardHtml(r, showActions){
       ${r.status==='andamento' ? `<button class="btn small secondary" data-action="aberta">Voltar para pendente</button>` : ''}
       ${r.status!=='concluida' ? `<button class="btn small secondary" data-assign>${r.assignee ? 'Alterar responsável' : 'Atribuir responsável'}</button>` : ''}
       ${isAdmin ? `<button class="btn small secondary" data-action="delete" style="color:var(--bad);border-color:var(--bad);">Excluir</button>` : ''}
+    </div>` : isAdmin ? `
+    <div class="req-actions">
+      <button class="btn small secondary" data-action="delete" style="color:var(--bad);border-color:var(--bad);">Excluir</button>
     </div>` : '';
 
   const fotoHtml = r.foto ? `<img src="${r.foto}" class="req-photo-thumb" alt="Foto da solicitação" title="Foto da solicitação (clique para ampliar)">` : '';
@@ -1259,7 +1342,11 @@ function wireReqCard(card, onUpdate){
       if(action==='delete'){
         if(!isAdmin){ alert('Ação restrita ao administrador.'); return; }
         if(!confirm('Excluir esta solicitação permanentemente?')) return;
-        await window.storage.delete('req:'+id, true);
+        // Marca como excluída em vez de deletar do Firebase (preserva histórico)
+        r.status = 'excluida';
+        r.deletedAt = Date.now();
+        r.updatedAt = Date.now();
+        await saveRequest(id, r);
         onUpdate();
         return;
       }
@@ -1453,7 +1540,8 @@ async function renderRequests(){
   /* ---- ACOMPANHAR / PAINEL UNIFICADO ---- */
   if(reqTab==='track'){
     content.innerHTML=`<div class="loading">Carregando...</div>`;
-    const all=await loadAllRequests();
+    const allRaw=await loadAllRequests();
+    const all=allRaw.filter(r=>r.status!=='excluida'); // exclui dos indicadores
 
     // ── Helpers ──
     const meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -1481,6 +1569,7 @@ async function renderRequests(){
     // Get selected month from existing select if any
     const prevMonth = content.querySelector('#filterMonth')?.value || '';
 
+    const excluidas=allRaw.filter(r=>r.status==='excluida');
     const abertas=all.filter(r=>r.status==='aberta');
     const andamento=all.filter(r=>r.status==='andamento');
     const concluidas=all.filter(r=>r.status==='concluida');
@@ -1587,6 +1676,11 @@ async function renderRequests(){
       <div id="sec-concluida">
         ${concluidas.length ? concluidas.map(r=>reqCardHtml(r,false)).join('') : '<div class="empty-state">Nenhuma concluída ainda.</div>'}
       </div>
+      ${isAdmin && excluidas.length ? `
+      <div class="section-title" style="margin-top:24px;color:#888;">Excluídas pelo Admin (${excluidas.length})</div>
+      <div id="sec-excluida" style="opacity:.6;">
+        ${excluidas.map(r=>reqCardHtml(r,false)).join('')}
+      </div>` : ''}
     `;
     content.innerHTML=html;
 
@@ -1838,7 +1932,8 @@ async function renderReportChecklist(){
 async function renderReportRequests(){
   const content=document.getElementById('repContent');
   content.innerHTML='<div class="loading">Carregando solicitações...</div>';
-  const all=await loadAllRequests();
+  const allRaw=await loadAllRequests();
+  const all=allRaw.filter(r=>r.status!=='excluida'); // exclui dos indicadores
 
   // Globais (todos os períodos)
   const abertas=all.filter(r=>r.status==='aberta');
@@ -1856,6 +1951,32 @@ async function renderReportRequests(){
   const conPer=allPeriod.filter(r=>r.status==='concluida');
   const naoResPer=allPeriod.filter(r=>r.status!=='concluida');
   const taxaRes=allPeriod.length?Math.round(conPer.length/allPeriod.length*100):0;
+
+  // SLA médio (abertura → conclusão) em horas
+  function calcSla(list){
+    const valid=list.filter(r=>r.closedAt&&r.createdAt);
+    if(!valid.length) return null;
+    const avg=valid.reduce((s,r)=>s+(r.closedAt-r.createdAt),0)/valid.length;
+    const h=avg/3600000;
+    return h<1?Math.round(h*60)+'min':h<24?h.toFixed(1)+'h':(h/24).toFixed(1)+'d';
+  }
+  const slaGeral=calcSla(concluidas);
+  const slaPer=calcSla(conPer);
+
+  // Breakdown por tipo de ocorrência
+  const tiposGeral={};
+  all.forEach(r=>{ const t=r.tipo||'Não informado'; tiposGeral[t]=(tiposGeral[t]||0)+1; });
+  const tiposPer={};
+  allPeriod.forEach(r=>{ const t=r.tipo||'Não informado'; tiposPer[t]=(tiposPer[t]||0)+1; });
+
+  // Meses disponíveis para filtro
+  const monthSet=new Set(allRaw.filter(r=>r.status!=='excluida').map(r=>{ const d=new Date(r.createdAt); return d.getFullYear()+'-'+(d.getMonth()+1); }));
+  const meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const monthOptions=[...monthSet].sort().reverse().map(m=>{ const [y,mo]=m.split('-'); return `<option value="${m}">${meses[parseInt(mo)-1]} ${y}</option>`; }).join('');
+
+  // Tipos para filtro — garante que o value bate exatamente com r.tipo
+  const tiposUnicos = [...new Set(all.map(r=>r.tipo||'Não informado'))].sort();
+  const tipoOptions = `<option value="">Todos os tipos</option>` + tiposUnicos.map(t=>`<option value="${t}">${t}</option>`).join('');
 
   let periodLabel='';
   if(reportPeriod==='day') periodLabel=fmtBR(reportDate);
@@ -1883,10 +2004,38 @@ async function renderReportRequests(){
   </tr></thead><tbody>`;
 
   let html=`
+    <!-- ===== FILTROS ===== -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:20px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px;">
+      <div style="font-size:13px;font-weight:600;color:var(--text-dim);">Filtros:</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:11px;color:var(--text-dim);">Mês</label>
+        <select id="reqFilterMonth" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+          <option value="">Todos os períodos</option>
+          ${monthOptions}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:11px;color:var(--text-dim);">Tipo de ocorrência</label>
+        <select id="reqFilterTipo" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+          ${tipoOptions}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:11px;color:var(--text-dim);">Prioridade</label>
+        <select id="reqFilterPrio" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+          <option value="">Todas</option>
+          <option value="alta">Urgente</option>
+          <option value="normal">Normal</option>
+        </select>
+      </div>
+      <button id="reqFilterApply" class="btn" style="margin-top:18px;">Aplicar</button>
+      <button id="reqFilterClear" class="btn secondary" style="margin-top:18px;">Limpar</button>
+    </div>
+
     <!-- ===== CONSOLIDADO GERAL ===== -->
-    <div class="goal-card" style="flex-direction:column;gap:10px;align-items:flex-start;">
+    <div class="goal-card" style="flex-direction:column;gap:6px;align-items:flex-start;">
       <div style="font-size:16px;font-weight:700;">Consolidado geral de chamados</div>
-      <p style="margin:0;font-size:13px;color:var(--text-dim);">Situação atual de todas as solicitações registradas no sistema.</p>
+      <p style="margin:0;font-size:13px;color:var(--text-dim);">Situação atual — excluídos não contabilizados.</p>
     </div>
     <div class="stat-grid">
       <div class="stat-box"><div class="num" style="color:var(--amber)">${abertas.length}</div><div class="lbl">Pendentes</div></div>
@@ -1894,13 +2043,31 @@ async function renderReportRequests(){
       <div class="stat-box"><div class="num" style="color:var(--bad)">${naoResolvidas.length}</div><div class="lbl">Não resolvidas</div></div>
       <div class="stat-box"><div class="num" style="color:var(--ok)">${concluidas.length}</div><div class="lbl">Concluídas</div></div>
       <div class="stat-box"><div class="num" style="color:${taxaResGeral>=80?'var(--ok)':'var(--bad)'};">${taxaResGeral}%</div><div class="lbl">Taxa de resolução</div></div>
+      <div class="stat-box"><div class="num" style="color:${slaGeral?'var(--teal-bright)':'var(--text-dim)'}">${slaGeral||'—'}</div><div class="lbl">SLA médio ⓘ</div></div>
       <div class="stat-box"><div class="num">${all.length}</div><div class="lbl">Total geral</div></div>
     </div>
 
-    <!-- ===== PENDENTES (todos os períodos) ===== -->
+    <!-- ===== BREAKDOWN POR TIPO ===== -->
+    <div class="section-title">Chamados por tipo de ocorrência</div>
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+      ${Object.entries(tiposGeral).sort((a,b)=>b[1]-a[1]).map(([tipo,qtd])=>{
+        const pct=all.length?Math.round(qtd/all.length*100):0;
+        return `<div class="stat-box">
+          <div class="num" style="font-size:20px;color:var(--teal-bright);">${qtd}</div>
+          <div class="lbl" style="font-size:10px;text-transform:none;letter-spacing:0;">${tipo}</div>
+          <div style="margin-top:6px;height:4px;background:var(--panel-2);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pct}%;background:var(--teal);border-radius:3px;"></div>
+          </div>
+          <div style="font-size:10px;color:var(--text-dim);margin-top:3px;">${pct}% do total</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- ===== PENDENTES ===== -->
     <div class="section-title" style="margin-top:8px;">
       Chamados pendentes — aguardando atendimento (${naoResolvidas.length})
     </div>`;
+
 
   if(!naoResolvidas.length){
     html+=`<div class="empty-state">Nenhum chamado pendente 🎉</div>`;
@@ -1971,7 +2138,88 @@ async function renderReportRequests(){
     html+=`<div class="empty-state">Nenhuma solicitação registrada no período selecionado.</div>`;
   }
 
+  html+=`<div id="reqFilterResults"></div>`;
+
   content.innerHTML=html;
+
+  // Wire filters
+  document.getElementById('reqFilterApply')?.addEventListener('click', ()=>{
+    const fMonth = document.getElementById('reqFilterMonth').value;
+    const fTipo  = document.getElementById('reqFilterTipo').value;
+    const fPrio  = document.getElementById('reqFilterPrio').value;
+
+    // Se nenhum filtro selecionado, não faz nada
+    if(!fMonth && !fTipo && !fPrio) return;
+
+    let filtered = all;
+    if(fMonth){ const [y,mo]=fMonth.split('-'); filtered=filtered.filter(r=>{ const d=new Date(r.createdAt); return d.getFullYear()==y&&(d.getMonth()+1)==mo; }); }
+    if(fTipo)  filtered=filtered.filter(r=>(r.tipo||'Não informado')===fTipo);
+    if(fPrio)  filtered=filtered.filter(r=>r.prio===fPrio);
+
+    const conF=filtered.filter(r=>r.status==='concluida');
+    const aberF=filtered.filter(r=>r.status==='aberta');
+    const andF=filtered.filter(r=>r.status==='andamento');
+    const slaF=calcSla(conF);
+    const txF=filtered.length?Math.round(conF.length/filtered.length*100):0;
+
+    // Breakdown por tipo
+    const tiposF={};
+    filtered.forEach(r=>{ const t=r.tipo||'Não informado'; tiposF[t]=(tiposF[t]||0)+1; });
+    const tipoBreakdown=Object.entries(tiposF).sort((a,b)=>b[1]-a[1]).map(([tipo,qtd])=>{
+      const pct=filtered.length?Math.round(qtd/filtered.length*100):0;
+      const conTipo=conF.filter(r=>(r.tipo||'Não informado')===tipo).length;
+      return `<div class="stat-box">
+        <div class="num" style="font-size:20px;color:var(--teal-bright);">${qtd}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;font-weight:600;">${tipo}</div>
+        <div style="font-size:11px;color:var(--ok);margin-top:2px;">${conTipo} concluídas</div>
+        <div style="margin-top:6px;height:4px;background:var(--panel-2);border-radius:3px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:var(--teal);border-radius:3px;"></div>
+        </div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:3px;">${pct}% do filtro</div>
+      </div>`;
+    }).join('');
+
+    // Descrição dos filtros ativos
+    const filtrosAtivos = [
+      fMonth ? `Mês: ${fMonth}` : '',
+      fTipo  ? `Tipo: ${fTipo}` : '',
+      fPrio  ? `Prioridade: ${fPrio==='alta'?'Urgente':'Normal'}` : '',
+    ].filter(Boolean).join(' · ');
+
+    // Substituir TODA a tela com o resultado filtrado
+    content.innerHTML=`
+      <!-- Barra de filtros ativa -->
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px;background:var(--panel);border:1px solid var(--teal);border-radius:10px;padding:14px 18px;">
+        <div style="font-size:13px;color:var(--teal-bright);font-weight:600;">🔍 Filtro ativo:</div>
+        <div style="font-size:13px;color:var(--text);">${filtrosAtivos}</div>
+        <button id="reqFilterClearResult" class="btn secondary" style="margin-left:auto;">✕ Limpar filtro</button>
+      </div>
+
+      <!-- KPIs do filtro -->
+      <div class="stat-grid">
+        <div class="stat-box"><div class="num">${filtered.length}</div><div class="lbl">Total</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--amber)">${aberF.length+andF.length}</div><div class="lbl">Não resolvidas</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--ok)">${conF.length}</div><div class="lbl">Concluídas</div></div>
+        <div class="stat-box"><div class="num" style="color:${txF>=80?'var(--ok)':'var(--bad)'};">${txF}%</div><div class="lbl">Taxa resolução</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--teal-bright)">${slaF||'—'}</div><div class="lbl">SLA médio</div></div>
+      </div>
+
+      <!-- Breakdown por tipo (só se houver mais de 1) -->
+      ${Object.keys(tiposF).length>1?`<div class="section-title">Por tipo de ocorrência</div><div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));">${tipoBreakdown}</div>`:''}
+
+      <!-- Tabela de chamados -->
+      <div class="section-title">Chamados (${filtered.length})</div>
+      ${filtered.length
+        ? tableHead+filtered.sort((a,b)=>b.createdAt-a.createdAt).map(reqRow).join('')+'</tbody></table></div>'
+        : '<div class="empty-state">Nenhum resultado para os filtros selecionados.</div>'
+      }
+    `;
+
+    // Botão limpar volta para a tela completa
+    document.getElementById('reqFilterClearResult')?.addEventListener('click', ()=>{
+      renderReportRequests(content);
+    });
+  });
 }
 
 
@@ -2397,16 +2645,36 @@ function kSwitchTab(tab){
       showAdminBadge();
     }
   }catch(e){}
-  // Modo quiosque: acessado via QR code (?tab=requests) → só formulário, sem nav
+  // Modo checklist mobile: ?mode=checklist
   const urlParams = new URLSearchParams(window.location.search);
-  if(urlParams.get('tab') === 'requests'){
+  const isChecklistMode = urlParams.get('mode') === 'checklist';
+  if(isChecklistMode){
+    document.body.classList.add('checklist-mode');
+    // Mostra nome do funcionário se não estiver definido
+    if(!currentEmployee){
+      const nome = prompt('Seu nome (para registrar as limpezas):','');
+      if(nome && nome.trim()){
+        currentEmployee = nome.trim();
+        await saveEmployee(currentEmployee);
+      }
+    }
+    renderTopControls();
+    await renderChecklist();
+    hideLoader();
+  } else {
+  // Modo quiosque: acessado via QR code (?tab=requests) → só formulário, sem nav
+  const isKiosk = urlParams.get('tab') === 'requests' || urlParams.get('kiosk') === '1';
+  if(isKiosk){
     // header e nav ocultos via CSS body.kiosk
     // Renderiza diretamente o formulário de nova solicitação no modo quiosque
-    renderKiosk();
+    await renderKiosk();
+    hideLoader();
   } else {
     renderTopControls();
-    renderChecklist();
+    await renderChecklist();
+    hideLoader();
   }
+  } // fecha bloco else do checklist-mode
 })();
 </script>
 </body>
