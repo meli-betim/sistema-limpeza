@@ -26,11 +26,14 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;-webkit-font-smoothing:antialiased;}
+  *{-webkit-tap-highlight-color:rgba(0,0,0,0);box-sizing:border-box;}
+  button{touch-action:manipulation;}
 
   .topbar{
     background:linear-gradient(90deg,var(--teal) 0%, #156567 100%);
     padding:14px 24px;
     display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;
+    position:sticky;top:0;z-index:200;
   }
   .topbar h1{margin:0;font-size:18px;font-weight:600;}
   .topbar .sub{font-size:12px;color:#d7f3ef;opacity:.85;margin-top:2px;}
@@ -38,6 +41,7 @@
   .mainnav{
     display:flex;gap:4px;background:var(--panel);border-bottom:1px solid var(--line);
     padding:0 24px;
+    position:sticky;top:58px;z-index:199;
   }
   .mainnav button{
     background:transparent;border:none;color:var(--text-dim);padding:13px 18px;
@@ -168,6 +172,213 @@
   body.checklist-mode .occ { width:40px; height:40px; font-size:14px; }
   body.checklist-mode .occ-time { font-size:10px; }
   body.checklist-mode .turn-grid { grid-template-columns:1fr; gap:12px; }
+  /* ===================== MOBILE RESPONSIVE ===================== */
+  @media (max-width: 768px){
+    /* Topbar */
+    .topbar { padding: 0 12px; height: 52px; }
+    .topbar h1 { font-size: 14px; }
+    .topbar .sub { display: none; }
+    #topControls { gap: 6px; }
+    #topControls input[type="text"], #topControls input[type="date"] { font-size: 13px; padding: 6px 8px; }
+    #topControls .seg button { padding: 6px 10px; font-size: 12px; }
+    .nav-btn { padding: 6px 10px; font-size: 14px; }
+
+    /* Nav */
+    .mainnav { gap: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+    .mainnav button { font-size: 12px; padding: 12px 14px; white-space: nowrap; flex-shrink: 0; }
+
+    /* Wrap */
+    .wrap { padding: 12px 10px 80px; }
+
+    /* Checklist chips — maiores para toque */
+    .occ { width: 46px !important; height: 46px !important; font-size: 18px !important; }
+    .occ-time { font-size: 10px !important; }
+    .loc-name { font-size: 14px; font-weight: 600; }
+    .loc-row { padding: 12px 14px; }
+    .turn-head { padding: 12px 16px; }
+    .turn-grid { grid-template-columns: 1fr !important; gap: 12px; }
+    .occ-list { gap: 8px; flex-wrap: wrap; }
+
+    /* Progress bar */
+    .day-progress { padding: 10px 14px; font-size: 13px; }
+
+    /* Cards de solicitação */
+    .req-card { padding: 14px; }
+    .req-top { flex-direction: column; gap: 8px; }
+    .req-actions { flex-wrap: wrap; gap: 8px; }
+    .req-actions .btn { flex: 1; min-width: 120px; padding: 11px; font-size: 13px; }
+
+    /* Stat boxes */
+    .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 10px; }
+    .stat-box .num { font-size: 22px; }
+    .stat-box .lbl { font-size: 10px; }
+
+    /* Formulários */
+    .form-row label { font-size: 14px; }
+    .form-row input, .form-row select, .form-row textarea { font-size: 16px !important; padding: 12px !important; }
+    .btn { padding: 13px 18px; font-size: 14px; min-height: 48px; }
+    .btn.small { padding: 10px 14px; font-size: 13px; min-height: 40px; }
+
+    /* Login */
+    .card { padding: 24px 18px; }
+
+    /* Tabs */
+    .req-tabs { gap: 6px; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+    .req-tabs button { font-size: 13px; padding: 10px 14px; white-space: nowrap; flex-shrink: 0; min-height: 44px; }
+
+    /* Relatório */
+    .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .report-table { font-size: 12px; }
+    .turn-breakdown { grid-template-columns: 1fr !important; }
+    .goal-card { flex-direction: column; gap: 16px; }
+
+    /* User pill no topbar */
+    #topControls span[style*="border-radius:20px"] { font-size: 11px; padding: 3px 8px; }
+
+    /* Busca local */
+    .lsearch-wrap { max-width: 100% !important; }
+    .lsearch-item { padding: 14px 14px; font-size: 15px; min-height: 50px; }
+
+    /* Dropdown */
+    .lsearch-dd { max-height: 50vh; }
+
+    /* Seção excluídas */
+    .section-title { font-size: 12px; }
+
+    /* Gauge */
+    .gauge { width: 100px; height: 100px; }
+    .gauge-value .pct { font-size: 20px; }
+  }
+
+  @media (max-width: 480px){
+    .mainnav button { font-size: 11px; padding: 10px 10px; }
+    .occ { width: 42px !important; height: 42px !important; font-size: 16px !important; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .turn-grid { grid-template-columns: 1fr !important; }
+  }
+  /* ===================== HOME CORPORATIVA ===================== */
+  .home-root{
+    min-height:calc(100vh - 64px);
+    background:#f5f6f7;
+    padding:0 0 48px;
+    font-family:'Segoe UI',Arial,sans-serif;
+    color:#1a1a1a;
+  }
+  .home-header{
+    background:#fff;
+    border-bottom:1px solid #e4e6e8;
+    padding:24px 40px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+  }
+  .home-header-left{ display:flex; align-items:center; gap:16px; }
+  .home-logo-mark{
+    width:44px; height:44px; border-radius:10px;
+    background:#ffe600;
+    color:#1a1a1a;
+    font-size:15px; font-weight:800;
+    display:flex; align-items:center; justify-content:center;
+    letter-spacing:-.5px; flex-shrink:0;
+  }
+  .home-title{ font-size:20px; font-weight:700; color:#1a1a1a; line-height:1.2; }
+  .home-subtitle{ font-size:12px; color:#6b7280; margin-top:2px; }
+  .home-user-info{ display:flex; align-items:center; gap:12px; }
+  .home-user-avatar{
+    width:38px; height:38px; border-radius:50%;
+    background:#1a1a1a; color:#ffe600;
+    font-size:15px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .home-user-name{ font-size:13px; font-weight:600; color:#1a1a1a; }
+  .home-user-role{ font-size:11px; color:#6b7280; margin-top:1px; }
+  .home-divider{ height:1px; background:#e4e6e8; }
+  .home-section-label{
+    padding:36px 40px 6px;
+    font-size:11px; font-weight:700;
+    color:#9ca3af;
+    text-transform:uppercase; letter-spacing:1px;
+  }
+  .home-section-desc{
+    padding:0 40px 20px;
+    font-size:13px; color:#6b7280;
+  }
+  .home-modules-grid{
+    padding:0 40px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+    gap:14px;
+    max-width:1100px;
+  }
+  .home-module-card{
+    background:#fff;
+    border:1px solid #e4e6e8;
+    border-radius:12px;
+    padding:22px 22px 22px 22px;
+    display:flex;
+    align-items:center;
+    gap:18px;
+    cursor:pointer;
+    transition:border-color .15s, box-shadow .15s, transform .1s;
+    outline:none;
+    text-decoration:none;
+  }
+  .home-module-card:hover{
+    border-color:#ffe600;
+    box-shadow:0 4px 16px rgba(0,0,0,.08);
+    transform:translateY(-1px);
+  }
+  .home-module-card:active{ transform:translateY(0); box-shadow:none; }
+  .home-module-card:focus{ border-color:#1a1a1a; box-shadow:0 0 0 3px rgba(26,26,26,.1); }
+  .home-module-icon{
+    font-size:28px;
+    width:52px; height:52px;
+    background:#f9fafb;
+    border:1px solid #e4e6e8;
+    border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .home-module-body{ flex:1; min-width:0; }
+  .home-module-title{ font-size:15px; font-weight:600; color:#1a1a1a; margin-bottom:4px; }
+  .home-module-desc{ font-size:12px; color:#6b7280; line-height:1.5; }
+  .home-module-arrow{
+    font-size:20px; color:#d1d5db; font-weight:300;
+    transition:color .15s, transform .15s;
+    flex-shrink:0;
+  }
+  .home-module-card:hover .home-module-arrow{ color:#1a1a1a; transform:translateX(3px); }
+  .home-footer{
+    padding:32px 40px 0;
+    font-size:11px; color:#9ca3af;
+    display:flex; align-items:center; gap:8px;
+  }
+  .home-footer-dot{ color:#d1d5db; }
+
+  /* Home responsive */
+  @media(max-width:768px){
+    .home-header{ padding:16px 20px; }
+    .home-title{ font-size:17px; }
+    .home-subtitle{ display:none; }
+    .home-section-label,.home-section-desc{ padding-left:20px; padding-right:20px; }
+    .home-modules-grid{ padding:0 20px; grid-template-columns:1fr; }
+    .home-footer{ padding:24px 20px 0; }
+    .home-user-name,.home-user-role{ display:none; }
+  }
+  @media(max-width:480px){
+    .home-module-card{ padding:16px; gap:14px; }
+    .home-module-icon{ width:44px; height:44px; font-size:22px; }
+    .home-module-title{ font-size:14px; }
+  }
+  /* ===================== HOME CARDS (antigo - removido) ===================== */
+  /* Gestão de usuários */
+  .user-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:8px;}
+  .user-avatar{width:36px;height:36px;border-radius:50%;background:var(--teal);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;}
+  .user-name{font-size:14px;font-weight:600;color:var(--text);flex:1;}
+  .user-pin{font-size:12px;color:var(--text-dim);background:var(--panel-2);padding:2px 8px;border-radius:6px;letter-spacing:2px;}
+  .user-turno{font-size:11px;color:var(--teal-bright);background:rgba(31,138,140,.12);padding:2px 8px;border-radius:6px;}
   #blockedAlertBanner{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1e2e;border:1px solid var(--bad);color:var(--text);padding:14px 22px;border-radius:12px;font-size:13.5px;z-index:9999;box-shadow:0 4px 24px rgba(0,0,0,.6);max-width:420px;text-align:center;line-height:1.5;}
   @keyframes overduePulse{0%,100%{box-shadow:0 0 0 0 rgba(217,106,90,.55);}50%{box-shadow:0 0 0 5px rgba(217,106,90,0);}}
   .req-photo-thumb{max-width:160px;max-height:160px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;margin-top:8px;object-fit:cover;}
@@ -287,9 +498,11 @@
 </div>
 
 <div class="mainnav">
-  <button id="navChecklist" class="active">Checklist de Limpeza</button>
+  <button id="navChecklist">Plano de Limpeza</button>
   <button id="navRequests">Solicitações</button>
   <button id="navReport">Relatório</button>
+  <button id="navEfetivo">👷 Efetivo</button>
+  <button id="navUsers" style="display:none;">👥 Usuários</button>
         <button id="navAdmin">🔑 Admin</button>
 </div>
 
@@ -505,15 +718,16 @@ let reportDate = new Date();
 const GOAL_PCT = 95;
 
 /* ===================== GLOBAL NAV STATE ===================== */
-let section = 'checklist'; // 'checklist' | 'requests'
+let section = 'home'; // 'home' | 'checklist' | 'requests' | 'report' | 'users'
 
 /* ===================== CHECKLIST STATE ===================== */
 let mode = 'day';
 let currentDate = new Date();
 let dayCache = {};
 let currentEmployee = '';
-let isAdmin = false; // modo administrador
-const ADMIN_HASH = '6cc963feb1c1187e040f1a5806d4a8b4ffa6f4cf9153c3f3457a5859edd01b3d'; // Meli@2027
+let isAdmin = false;
+let currentUser = null; // usuário logado via PIN // modo administrador
+const ADMIN_HASH = '30599c3ffd8a494ba82e42e55c7905d5fe5026318bb305b465432925c224a58a'; // Meli@2027
 
 // SHA-256 simples para validar senha sem expor em texto puro
 async function hashPassword(str){
@@ -542,16 +756,25 @@ function adminLogout(){
   // Restaura botão do menu
   const nav = document.getElementById('navAdmin');
   if(nav){ nav.textContent = '🔑 Admin'; nav.classList.remove('active'); }
+  const navU2 = document.getElementById('navUsers');
+  if(navU2) navU2.style.display = 'none';
   renderTopControls();
   renderChecklist();
 }
 function showAdminBadge(){
-  // Atualiza o botão do menu
   const nav = document.getElementById('navAdmin');
   if(nav){ nav.textContent = '🔑 ADMIN — Sair'; nav.classList.add('active'); }
-  // Remove badge antigo se existir
+  const navU = document.getElementById('navUsers');
+  if(navU) navU.style.display = '';
   const old = document.getElementById('adminBadge');
   if(old) old.remove();
+}
+
+function updateNavAdminVisibility(){
+  const nav = document.getElementById('navAdmin');
+  if(!nav) return;
+  // Sempre mostra — operador verá aviso ao clicar
+  nav.style.display = '';
 }
 
 async function loadEmployee(){
@@ -633,12 +856,12 @@ function turnParity(turnKey){ return (turnKey==='T1D'||turnKey==='T1N') ? 'par' 
 function getShiftWindow(turnKey, date){
   const d = new Date(date); d.setHours(0,0,0,0);
   if(turnKey==='T1D' || turnKey==='T2D'){
-    const start = new Date(d); start.setHours(6,0,0,0);
-    const end = new Date(d); end.setHours(18,0,0,0);
+    const start = new Date(d); start.setHours(7,0,0,0);
+    const end = new Date(d); end.setHours(19,0,0,0);
     return {start, end};
   } else {
-    const start = new Date(d); start.setHours(18,0,0,0);
-    const end = new Date(d); end.setDate(end.getDate()+1); end.setHours(6,0,0,0);
+    const start = new Date(d); start.setHours(19,0,0,0);
+    const end = new Date(d); end.setDate(end.getDate()+1); end.setHours(7,0,0,0);
     return {start, end};
   }
 }
@@ -649,49 +872,80 @@ function occDeadline(loc, turnKey, idx, date){
   const interval = (end-start)/n;
   return new Date(start.getTime() + interval*(idx+1));
 }
-function isOverdue(loc, turnKey, idx, date, state){
-  if(state!=='pending') return false; // já marcado — não fica atrasado
-  const dayPar = isParDay(date);
-  const colParity = turnParity(turnKey);
-  if((dayPar && colParity!=='par') || (!dayPar && colParity!=='impar')) return false; // coluna não roda neste dia
-  const deadline = occDeadline(loc, turnKey, idx, date);
-  if(!deadline) return false;
-  const nowBRT2 = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
-  return nowBRT2 > deadline.getTime();
-}
 // Retorna true se o local é banheiro (frequência 6 por turno)
 function isBathroomLoc(loc){
   return Object.values(loc.f).some(v => v === 6);
 }
-// Retorna true se o turno está fora do horário atual
+// Retorna a tolerância de bloqueio após o deadline (ms)
+// Última ocorrência do turno: 30min após FIM do turno
+// Demais ocorrências: 1h após o deadline da ocorrência
+function blockTolerance(loc, turnKey, idx, date){
+  const n = resolveFreq(loc, turnKey, date);
+  const {end} = getShiftWindow(turnKey, date);
+  const dl = occDeadline(loc, turnKey, idx, date);
+  if(!dl) return 60*60*1000;
+  const isLast = (idx === n-1);
+  if(isLast){
+    // Última ocorrência: permite até 30min após o fim do turno
+    return (end.getTime() + 30*60*1000) - dl.getTime();
+  } else {
+    // Demais: 1h de tolerância após o deadline
+    return 60*60*1000;
+  }
+}
+
+// Overdue unificado: pendente e passou do deadline
+function isOverdue(loc, turnKey, idx, date, state){
+  if(state!=='pending') return false;
+  const dayPar = isParDay(date);
+  const colParity = turnParity(turnKey);
+  if((dayPar && colParity!=='par') || (!dayPar && colParity!=='impar')) return false;
+  const deadline = occDeadline(loc, turnKey, idx, date);
+  if(!deadline) return false;
+  const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  return nowMs > deadline.getTime();
+}
+
+// Blocked unificado: pendente e passou deadline + tolerância
+// Para banheiros: também bloqueia se muito cedo (>2h antes)
+function isBlockedLate(loc, turnKey, idx, date, state){
+  if(state !== 'pending') return false;
+  if(isAdmin) return false;
+  const deadline = occDeadline(loc, turnKey, idx, date);
+  if(!deadline) return false;
+  const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  const dl = deadline.getTime();
+  const tol = blockTolerance(loc, turnKey, idx, date);
+  const tooLate = nowMs > dl + tol;
+  if(isBathroomLoc(loc)){
+    // Banheiros: também bloqueia antecipação >2h
+    const tooEarly = nowMs < dl - 2*60*60*1000;
+    return tooEarly || tooLate;
+  }
+  return tooLate;
+}
+
+// isNonBathroomOverdue e isNonBathroomBlocked agora delegam para as funções unificadas acima
+function isNonBathroomOverdue(turnKey, date){ return false; } // não usado mais
+function isNonBathroomBlocked(turnKey, date, state){ return false; } // não usado mais
 // T1D/T2D = Par, T1N/T2N = Ímpar
 // Dentro do turno: T*D (diurno) = 06:00-18:00 | T*N (noturno) = 18:00-06:00
+// Retorna a hora BRT atual como objeto Date
+function nowBRT(){ return new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})); }
+
+
 function isTurnBlocked(turnKey){
   if(isAdmin) return false;
   // Usa fuso de Brasília (UTC-3) para garantir horário correto independente do dispositivo
   const nowBRT = new Date(new Date().toLocaleString('en-US', {timeZone:'America/Sao_Paulo'}));
   const h = nowBRT.getHours();
-  const isDiurnoAgora = h >= 6 && h < 18;
+  const isDiurnoAgora = h >= 7 && h < 19;
   // D = diurno (06-18h), N = noturno (18-06h)
   const turnIsDiurno  = turnKey === 'T1D' || turnKey === 'T2D';
   const turnIsNoturno = turnKey === 'T1N' || turnKey === 'T2N';
   if(turnIsDiurno  && !isDiurnoAgora) return true;  // turno diurno bloqueado à noite
   if(turnIsNoturno &&  isDiurnoAgora) return true;  // turno noturno bloqueado de dia
   return false;
-}
-// banheiros fora da janela de ±2h do deadline (muito cedo OU muito tarde)
-// Admin ignora o bloqueio
-function isBlockedLate(loc, turnKey, idx, date, state){
-  if(state !== 'pending') return false; // já marcado — não bloqueia
-  if(!isBathroomLoc(loc)) return false; // só banheiros
-  if(isAdmin) return false; // admin ignora restrição
-  const deadline = occDeadline(loc, turnKey, idx, date);
-  if(!deadline) return false;
-  const nowBRT = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
-  const dl = deadline.getTime();
-  const tooEarly = nowBRT < dl - 2 * 60 * 60 * 1000; // mais de 2h antes
-  const tooLate  = nowBRT > dl + 2 * 60 * 60 * 1000; // mais de 2h depois
-  return tooEarly || tooLate;
 }
 
 /* ===================== FOTO ANEXADA NAS SOLICITAÇÕES =====================
@@ -748,15 +1002,72 @@ function getEntry(data,k){
 
 function renderTopControls(){
   const tc = document.getElementById('topControls');
+  // Mark correct nav button active
+  ['navChecklist','navRequests','navReport','navUsers','navEfetivo'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.classList.remove('active');
+  });
+  const activeNav={checklist:'navChecklist',requests:'navRequests',report:'navReport',users:'navUsers',efetivo:'navEfetivo'}[section];
+  if(activeNav && document.getElementById(activeNav)) document.getElementById(activeNav).classList.add('active');
+  updateNavAdminVisibility();
+
+  const userPill = currentUser
+    ? `<span style="font-size:12px;color:rgba(255,255,255,.8);background:rgba(0,0,0,.2);padding:4px 10px;border-radius:20px;display:flex;align-items:center;gap:6px;">
+        👤 ${currentUser.nome}
+        <span id="btnChangePin" style="cursor:pointer;color:rgba(255,255,255,.6);font-size:11px;" title="Alterar PIN">🔑</span>
+        <span id="btnLogoutUser" style="cursor:pointer;color:rgba(255,255,255,.6);font-size:11px;" title="Sair">✕</span>
+       </span>`
+    : '';
+
+  if(section==='requests'||section==='users'){
+    tc.innerHTML = userPill;
+    wireUserPillButtons();
+    return;
+  }
+  if(section==='efetivo'){
+    tc.innerHTML = `${userPill}<button class="nav-btn" id="efPrevBtn">‹</button><input type="date" id="efDatePicker" value="${dateStr(currentDate)}" min="2026-06-01" style="background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.25);color:#fff;padding:7px 10px;border-radius:6px;font-size:13px;"><button class="nav-btn" id="efNextBtn">›</button>`;
+    document.getElementById('efPrevBtn').onclick=()=>{ currentDate.setDate(currentDate.getDate()-1); renderTopControls(); renderEfetivo(); };
+    document.getElementById('efNextBtn').onclick=()=>{ currentDate.setDate(currentDate.getDate()+1); renderTopControls(); renderEfetivo(); };
+    document.getElementById('efDatePicker').onchange=(e)=>{ const [y,m,d]=e.target.value.split('-').map(Number); currentDate=new Date(y,m-1,d); renderEfetivo(); };
+    wireUserPillButtons();
+    return;
+  }
+  if(section==='xDUMMYx'){
+    tc.innerHTML = userPill;
+    wireUserPillButtons();
+    return;
+  }
+  if(section==='efetivo'){
+    tc.innerHTML = `
+      ${userPill}
+      <button class="nav-btn" id="efPrevBtn">‹</button>
+      <input type="date" id="efDatePicker" value="${dateStr(currentDate)}" min="2026-06-01"
+        style="background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.25);color:#fff;padding:7px 10px;border-radius:6px;font-size:13px;">
+      <button class="nav-btn" id="efNextBtn">›</button>
+    `;
+    document.getElementById('efPrevBtn').onclick=()=>{ currentDate.setDate(currentDate.getDate()-1); renderTopControls(); renderEfetivo(); };
+    document.getElementById('efNextBtn').onclick=()=>{ currentDate.setDate(currentDate.getDate()+1); renderTopControls(); renderEfetivo(); };
+    document.getElementById('efDatePicker').onchange=(e)=>{ const [y,m,d]=e.target.value.split('-').map(Number); currentDate=new Date(y,m-1,d); renderEfetivo(); };
+    wireUserPillButtons();
+    return;
+  }
+  if(section==='home2'||section==='xyzabc'){
+    tc.innerHTML = userPill;
+    wireUserPillButtons();
+    return;
+  }
   if(section==='checklist'){
     tc.innerHTML = `
+      ${userPill}
       <input type="text" id="empInput" placeholder="Nome padrão (sugestão)" value="${currentEmployee}" style="background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.25);color:#fff;padding:7px 10px;border-radius:6px;font-size:13px;width:170px;" title="Nome sugerido ao marcar uma limpeza — pode ser alterado a cada clique">
       <div class="seg">
         <button id="btnDay" class="${mode==='day'?'active':''}">Dia</button>
         <button id="btnWeek" class="${mode==='week'?'active':''}">Semana</button>
       </div>
       <button class="nav-btn" id="prevBtn">‹</button>
-      <input type="date" id="datePicker" value="${dateStr(currentDate)}">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:1px;">
+        <span style="font-size:10px;color:rgba(255,255,255,.7);letter-spacing:.3px;">${['DOM','SEG','TER','QUA','QUI','SEX','SÁB'][currentDate.getDay()]}</span>
+        <input type="date" id="datePicker" value="${dateStr(currentDate)}">
+      </div>
       <button class="nav-btn" id="nextBtn">›</button>
     `;
     document.getElementById('empInput').addEventListener('change', (e)=>{ saveEmployee(e.target.value.trim()); });
@@ -776,8 +1087,10 @@ function renderTopControls(){
       currentDate.setDate(currentDate.getDate() + (mode==='week'?7:1));
       renderTopControls(); renderChecklist();
     };
+    wireUserPillButtons();
   } else if(section==='report'){
     tc.innerHTML = `
+      ${userPill}
       <div class="seg">
         <button id="repDay" class="${reportPeriod==='day'?'active':''}">Dia</button>
         <button id="repWeek" class="${reportPeriod==='week'?'active':''}">Semana</button>
@@ -807,9 +1120,24 @@ function renderTopControls(){
       else reportDate.setMonth(reportDate.getMonth()+1);
       renderTopControls(); renderReport();
     };
+    wireUserPillButtons();
   } else {
-    tc.innerHTML = '';
+    tc.innerHTML = userPill;
+    wireUserPillButtons();
   }
+}
+
+function wireUserPillButtons(){
+  const btnPin = document.getElementById('btnChangePin');
+  if(btnPin) btnPin.addEventListener('click', ()=>renderChangePinModal());
+  const btnLogout = document.getElementById('btnLogoutUser');
+  if(btnLogout) btnLogout.addEventListener('click', async ()=>{
+    if(!confirm('Sair da sua conta?')) return;
+    currentUser=null; currentEmployee=''; isAdmin=false;
+    try{ await window.storage.delete('userSession',false); }catch(e){}
+    try{ await window.storage.delete('adminSession',false); }catch(e){}
+    await renderUserLogin();
+  });
 }
 
 function showBlockedAlert(type, availableAt){
@@ -835,6 +1163,10 @@ function hideLoader(){
   const ol = document.getElementById('loadingOverlay');
   if(ol){ ol.style.opacity='0'; setTimeout(()=>ol.remove(), 300); }
 }
+/* ===================== HOME ===================== */
+
+
+
 async function renderChecklist(){
   if(mode==='day') await renderDay(); else await renderWeek();
 }
@@ -869,7 +1201,7 @@ async function renderDay(){
 
   let html = `
     <div class="progress-bar-outer">
-      <div class="label">${fmtBR(currentDate)} — progresso do dia</div>
+      <div class="label">${['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'][currentDate.getDay()]+', '+fmtBR(currentDate)} — progresso do dia</div>
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
       <div class="progress-pct">${pct}%</div>
     </div>
@@ -918,16 +1250,16 @@ async function renderDay(){
         } else if(st==='pending' && isTurnBlocked(t.key)){
           const isDiurno = t.key==='T1D'||t.key==='T2D';
           title = isDiurno
-            ? 'Turno diurno — disponível das 06:00 às 18:00'
-            : 'Turno noturno — disponível das 18:00 às 06:00';
+            ? 'Turno diurno — disponível das 07:00 às 19:00'
+            : 'Turno noturno — disponível das 19:00 às 07:00';
         } else if(blocked){
           const dl = occDeadline(loc, t.key, i, currentDate);
           const now = Date.now();
           const dlMs = dl ? dl.getTime() : 0;
-          const tooEarly = now < dlMs - 2*3600000;
+          const tooEarly = dlMs && now < dlMs - 2*3600000;
           title = tooEarly
             ? `Disponível a partir das ${fmtTime(dlMs - 2*3600000)} — aguarde o horário`
-            : 'Prazo encerrado — lançamento não permitido após 2h do horário planejado';
+            : 'Prazo encerrado — lançamento não permitido.';
         } else if(overdue){
           const dl = occDeadline(loc, t.key, i, currentDate);
           title = 'Atrasado — deveria ter sido feito até '+fmtTime(dl.getTime());
@@ -1051,7 +1383,7 @@ async function renderDay(){
         // Bloqueio de turno
         if(isTurnBlocked(turnKey)){
           const isDiurno = turnKey==='T1D'||turnKey==='T2D';
-          showBlockedAlert('turn', isDiurno ? '06:00' : '18:00');
+          showBlockedAlert('turn', isDiurno ? '07:00' : '19:00');
           return;
         }
 
@@ -1143,6 +1475,7 @@ async function renderWeek(){
 
 /* ===================== REQUESTS (TICKETS) ===================== */
 let reqTab = 'track'; // abre direto em acompanhar
+let reqSubTab = 'pendentes'; // sub-aba padrão
 
 function genTicketId(){
   const d = new Date();
@@ -1205,6 +1538,14 @@ async function deleteRequest(id){
   _requests = _requests.filter(r=>r.id!==id);
 }
 
+function fmtDuration(ms){
+  const h = Math.floor(ms/3600000);
+  const m = Math.round((ms%3600000)/60000);
+  if(h===0) return m+'min';
+  if(m===0) return h+'h';
+  return h+'h '+m+'min';
+}
+
 function statusBadge(status){
   if(status==='concluida') return '<span class="badge concluida">Concluída ✓</span>';
   if(status==='excluida')  return '<span class="badge excluida">Excluída</span>';
@@ -1236,6 +1577,19 @@ function reqCardHtml(r, showActions){
 
   const fotoHtml = r.foto ? `<img src="${r.foto}" class="req-photo-thumb" alt="Foto da solicitação" title="Foto da solicitação (clique para ampliar)">` : '';
   const tipoHtml = r.tipo ? `<span class="badge" style="background:rgba(63,214,201,.12);color:var(--teal-bright);margin-right:4px;">📋 ${r.tipo}</span>` : '';
+
+  // Alerta: aberto há mais de 1h e ainda pendente/andamento
+  const openMs = Date.now() - r.createdAt;
+  const isLongOpen = (r.status==='aberta'||r.status==='andamento') && openMs > 60*60*1000;
+  const alertHtml = isLongOpen
+    ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);border-radius:7px;padding:6px 10px;font-size:12px;color:var(--bad);">
+        ⚠️ Chamado aberto há <strong>${fmtDuration(openMs)}</strong> — aguardando atendimento
+      </div>` : '';
+
+  // Tempo de conclusão
+  const durHtml = r.status==='concluida' && r.closedAt && r.createdAt
+    ? `<span style="font-size:12px;color:var(--ok);margin-left:8px;">⏱ Concluída em ${fmtDuration(r.closedAt - r.createdAt)}</span>`
+    : '';
   const evidenciaHtml = r.evidencia ? `
     <div style="margin-top:10px;">
       <div style="font-size:11px;color:var(--ok);font-weight:700;margin-bottom:4px;">📷 Evidência de conclusão</div>
@@ -1243,10 +1597,11 @@ function reqCardHtml(r, showActions){
     </div>` : '';
 
   return `<div class="req-card" data-id="${r.id}">
+    ${alertHtml}
     <div class="req-top">
       <div>
         <div class="req-id">#${r.id}</div>
-        <div class="req-local">${r.local}</div>
+        <div class="req-local">${r.local}${durHtml}</div>
         ${tipoHtml}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">${statusBadge(r.status)}${prioBadge(r.prio)}</div>
@@ -1354,6 +1709,10 @@ function wireReqCard(card, onUpdate){
         return;
       }
       if(action==='concluida'){
+        if(!r.assignee){
+          alert('⚠️ É necessário atribuir um responsável antes de concluir a solicitação.');
+          return;
+        }
         openCloseModal(r, async (who, evidenciaDataUrl)=>{
           r.status='concluida';
           r.closedAt=Date.now();
@@ -1388,15 +1747,30 @@ function wireReqCard(card, onUpdate){
 }
 
 async function renderRequests(){
+  // Proteção de rota — redireciona para login se não autenticado
+  const _users = await (async()=>{ try{ const s=await window.storage.get('system:users',true); return s?JSON.parse(s.value):[]; }catch(e){return [];} })();
+  if(_users.length > 0 && !currentUser){ await renderUserLogin(); return; }
+
   const app = document.getElementById('app');
   app.innerHTML = `<div class="req-tabs">
     <button data-tab="new" class="${reqTab==='new'?'active':''}">+ Nova solicitação</button>
     <button data-tab="track" class="${reqTab==='track'?'active':''}">Acompanhar / Painel</button>
     <button data-tab="qr" onclick="showQRModal();event.stopPropagation();" style="background:transparent;border:1px solid rgba(63,214,201,.4);color:#3fd6c9;margin-left:auto;">📱 QR Code</button>
-  </div><div id="reqContent"></div>`;
+  </div>
+  ${reqTab==='track' ? `<div class="req-tabs" style="margin-top:-10px;margin-bottom:4px;gap:6px;">
+    <button data-subtab="pendentes" class="${reqSubTab==='pendentes'?'active':''}" style="${reqSubTab==='pendentes'?'background:var(--amber);color:#000;border-color:var(--amber);':''}">⏳ Pendentes</button>
+    <button data-subtab="concluidas" class="${reqSubTab==='concluidas'?'active':''}">✅ Concluídas</button>
+  </div>` : ''}
+  <div id="reqContent"></div>`;
 
-  app.querySelectorAll('.req-tabs button').forEach(b=>{
+  app.querySelectorAll('.req-tabs button[data-tab]').forEach(b=>{
     b.addEventListener('click', ()=>{ reqTab=b.getAttribute('data-tab'); renderRequests(); });
+  });
+  app.querySelectorAll('button[data-subtab]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      reqSubTab=b.getAttribute('data-subtab');
+      renderRequests();
+    });
   });
 
   const content = document.getElementById('reqContent');
@@ -1549,13 +1923,39 @@ async function renderRequests(){
     // ── Helpers ──
     const meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-    // SLA médio em horas (apenas concluídas com closedAt e createdAt)
+    // SLA médio — duas variantes:
+    // Pendentes: tempo em aberto (agora - createdAt)
+    // Concluídas: tempo de resolução (closedAt - createdAt)
+    function fmtDurationSla(ms){
+      if(ms === null) return null;
+      const h = ms/3600000;
+      if(h < 1) return Math.round(h*60)+'min';
+      if(h < 24) return h.toFixed(1)+'h';
+      const d = Math.floor(h/24), hrem = Math.round(h%24);
+      return hrem > 0 ? `${d}d ${hrem}h` : `${d}d`;
+    }
+    function calcSlaContextual(list, subTab){
+      const now = Date.now();
+      if(subTab === 'pendentes'){
+        // Tempo em aberto para pendentes+andamento
+        const valid = list.filter(r=>(r.status==='aberta'||r.status==='andamento')&&r.createdAt);
+        if(!valid.length) return null;
+        const avgMs = valid.reduce((s,r)=>s+(now-r.createdAt),0)/valid.length;
+        return fmtDurationSla(avgMs);
+      } else {
+        // Tempo de resolução para concluídas
+        const valid = list.filter(r=>r.status==='concluida'&&r.closedAt&&r.createdAt);
+        if(!valid.length) return null;
+        const avgMs = valid.reduce((s,r)=>s+(r.closedAt-r.createdAt),0)/valid.length;
+        return fmtDurationSla(avgMs);
+      }
+    }
+    function slaLabel(){ return reqSubTab==='pendentes' ? 'SLA médio em aberto' : 'SLA médio de resolução'; }
     function slaMedia(list){
       const valid = list.filter(r=>r.status==='concluida'&&r.closedAt&&r.createdAt);
       if(!valid.length) return null;
       const avgMs = valid.reduce((s,r)=>s+(r.closedAt-r.createdAt),0)/valid.length;
-      const h = avgMs/3600000;
-      return h<1 ? Math.round(h*60)+'min' : h<24 ? h.toFixed(1)+'h' : (h/24).toFixed(1)+'d';
+      return fmtDurationSla(avgMs);
     }
     function slaMediaMs(list){
       const valid = list.filter(r=>r.status==='concluida'&&r.closedAt&&r.createdAt);
@@ -1576,13 +1976,77 @@ async function renderRequests(){
     const abertas=all.filter(r=>r.status==='aberta');
     const andamento=all.filter(r=>r.status==='andamento');
     const concluidas=all.filter(r=>r.status==='concluida');
-    const totalSla = slaMedia(concluidas);
-    const txResolucao = all.length ? Math.round(concluidas.length/all.length*100) : 0;
-    const urgentes = all.filter(r=>r.prio==='alta');
-    const urgConcluidas = urgentes.filter(r=>r.status==='concluida');
-    const slaMsGeral = slaMediaMs(concluidas);
-    const slaUrgMs = slaMediaMs(urgConcluidas);
-    const slaOk = slaMsGeral !== null && slaMsGeral <= 4*3600000; // meta: 4h
+
+    // ── Função centralizada de KPIs ──────────────────────────────────────────
+    const SLA_META_MS = 4 * 3600000; // meta: 4h
+
+    function buildKpiHtml(dataset, subTab){
+      const now = Date.now();
+      const pAbertas   = dataset.filter(r=>r.status==='aberta');
+      const pAndamento = dataset.filter(r=>r.status==='andamento');
+      const pConcluidas= dataset.filter(r=>r.status==='concluida');
+      const semResp    = pAbertas.filter(r=>!r.assignee);
+      const urgentes   = dataset.filter(r=>(r.status==='aberta'||r.status==='andamento')&&r.prio==='alta');
+
+      if(subTab === 'pendentes'){
+        // SLA médio em aberto (agora - createdAt) para pendentes+andamento
+        const pendAll = [...pAbertas,...pAndamento];
+        const slaAberto = pendAll.length
+          ? fmtDurationSla(pendAll.reduce((s,r)=>s+(now-r.createdAt),0)/pendAll.length)
+          : null;
+        return `
+          <div class="stat-box">
+            <div class="num" style="color:var(--amber)">${pAbertas.length+pAndamento.length}</div>
+            <div class="lbl">Não resolvidas</div>
+          </div>
+          <div class="stat-box">
+            <div class="num" style="color:var(--bad)">${semResp.length}</div>
+            <div class="lbl">Sem responsável</div>
+          </div>
+          <div class="stat-box">
+            <div class="num" style="color:var(--teal-bright)">${pAndamento.length}</div>
+            <div class="lbl">Em andamento</div>
+          </div>
+          <div class="stat-box" title="Tempo médio desde a abertura até agora.">
+            <div class="num" style="color:${slaAberto?'var(--amber)':'var(--text-dim)'}">${slaAberto||'—'}</div>
+            <div class="lbl">SLA médio em aberto</div>
+          </div>
+          <div class="stat-box">
+            <div class="num" style="color:var(--bad)">${urgentes.length}</div>
+            <div class="lbl">Urgentes</div>
+          </div>`;
+      } else {
+        // Concluídas
+        const validCon = pConcluidas.filter(r=>r.closedAt&&r.createdAt);
+        const slaResolucao = validCon.length
+          ? fmtDurationSla(validCon.reduce((s,r)=>s+(r.closedAt-r.createdAt),0)/validCon.length)
+          : null;
+        const dentroSla  = pConcluidas.filter(r=>r.closedAt&&r.createdAt&&(r.closedAt-r.createdAt)<=SLA_META_MS).length;
+        const foraSla    = pConcluidas.filter(r=>r.closedAt&&r.createdAt&&(r.closedAt-r.createdAt)>SLA_META_MS).length;
+        const taxaRes    = dataset.length ? Math.round(pConcluidas.length/dataset.length*100) : 0;
+        return `
+          <div class="stat-box">
+            <div class="num" style="color:var(--ok)">${pConcluidas.length}</div>
+            <div class="lbl">Concluídas</div>
+          </div>
+          <div class="stat-box" title="Tempo médio entre abertura e conclusão.">
+            <div class="num" style="color:${slaResolucao?'var(--teal-bright)':'var(--text-dim)'}">${slaResolucao||'—'}</div>
+            <div class="lbl">SLA médio de resolução</div>
+          </div>
+          <div class="stat-box">
+            <div class="num" style="color:var(--ok)">${dentroSla}</div>
+            <div class="lbl">Dentro do SLA</div>
+          </div>
+          <div class="stat-box">
+            <div class="num" style="color:var(--bad)">${foraSla}</div>
+            <div class="lbl">Fora do SLA</div>
+          </div>
+          <div class="stat-box">
+            <div class="num" style="color:var(--teal-bright)">${taxaRes}%</div>
+            <div class="lbl">Taxa de resolução</div>
+          </div>`;
+      }
+    }
 
     function renderMonth(filterVal){
       const filtered = filterVal
@@ -1591,31 +2055,29 @@ async function renderRequests(){
       const fAbertas    = filtered.filter(r=>r.status==='aberta');
       const fAndamento  = filtered.filter(r=>r.status==='andamento');
       const fConcluidas = filtered.filter(r=>r.status==='concluida');
-      const fSla = slaMedia(fConcluidas);
+      const fSla = calcSlaContextual(filtered, reqSubTab);
       const fTx = filtered.length ? Math.round(fConcluidas.length/filtered.length*100) : 0;
 
-      document.getElementById('dash-total').textContent     = filtered.length;
-      document.getElementById('dash-pendentes').textContent = fAbertas.length + fAndamento.length;
-      document.getElementById('dash-concluidas').textContent= fConcluidas.length;
-      document.getElementById('dash-tx').textContent        = fTx+'%';
-      document.getElementById('dash-sla').textContent       = fSla || '—';
-      document.getElementById('dash-sla').style.color       = fSla ? (slaOk?'var(--ok)':'var(--amber)') : 'var(--text-dim)';
+      // Recalcula KPIs contextuais
+      const kpisEl = document.getElementById('dash-kpis');
+      if(kpisEl) kpisEl.innerHTML = buildKpiHtml(filtered, reqSubTab);
+      console.log(`[KPI] aba=${reqSubTab} filtro="${filterVal||'todos'}" dataset=${filtered.length}`);
 
       const secAberta = document.getElementById('sec-aberta');
       const secAnd    = document.getElementById('sec-andamento');
       const secCon    = document.getElementById('sec-concluida');
 
-      if(secAberta){
+      if(secAberta && reqSubTab==='pendentes'){
         document.getElementById('sec-aberta-title').textContent = `Pendente — sem responsável (${fAbertas.length})`;
         secAberta.innerHTML = fAbertas.length ? fAbertas.map(r=>reqCardHtml(r,true)).join('') : '<div class="empty-state">Nenhuma solicitação pendente 🎉</div>';
         secAberta.querySelectorAll('.req-card').forEach(card=>wireReqCard(card, renderRequests));
       }
-      if(secAnd){
+      if(secAnd && reqSubTab==='pendentes'){
         document.getElementById('sec-and-title').textContent = `Em andamento — atribuídas (${fAndamento.length})`;
         secAnd.innerHTML = fAndamento.length ? fAndamento.map(r=>reqCardHtml(r,true)).join('') : '<div class="empty-state">Nenhuma em andamento.</div>';
         secAnd.querySelectorAll('.req-card').forEach(card=>wireReqCard(card, renderRequests));
       }
-      if(secCon){
+      if(secCon && reqSubTab==='concluidas'){
         document.getElementById('sec-con-title').textContent = `Concluídas (${fConcluidas.length})`;
         secCon.innerHTML = fConcluidas.length ? fConcluidas.map(r=>reqCardHtml(r,false)).join('') : '<div class="empty-state">Nenhuma concluída ainda.</div>';
         secCon.querySelectorAll('.req-card').forEach(card=>wireReqCard(card, renderRequests));
@@ -1633,28 +2095,9 @@ async function renderRequests(){
         <span id="filterLabel" style="font-size:12px;color:var(--text-dim);"></span>
       </div>
 
-      <!-- ── KPIs ── -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:24px;">
-        <div class="stat-box" style="cursor:pointer;" onclick="document.getElementById('sec-aberta').scrollIntoView({behavior:'smooth'})">
-          <div class="num" style="color:var(--text)" id="dash-total">${all.length}</div>
-          <div class="lbl">Total</div>
-        </div>
-        <div class="stat-box" style="cursor:pointer;" onclick="document.getElementById('sec-aberta').scrollIntoView({behavior:'smooth'})">
-          <div class="num" style="color:var(--amber)" id="dash-pendentes">${abertas.length+andamento.length}</div>
-          <div class="lbl">Não resolvidas</div>
-        </div>
-        <div class="stat-box" style="cursor:pointer;" onclick="document.getElementById('sec-concluida').scrollIntoView({behavior:'smooth'})">
-          <div class="num" style="color:var(--ok)" id="dash-concluidas">${concluidas.length}</div>
-          <div class="lbl">Concluídas</div>
-        </div>
-        <div class="stat-box">
-          <div class="num" style="color:var(--teal-bright)" id="dash-tx">${txResolucao}%</div>
-          <div class="lbl">Taxa resolução</div>
-        </div>
-        <div class="stat-box" title="SLA médio = tempo médio entre abertura e conclusão. Meta: até 4h.">
-          <div class="num" style="color:${slaOk?'var(--ok)':'var(--amber)'}" id="dash-sla">${totalSla||'—'}</div>
-          <div class="lbl">SLA médio ⓘ</div>
-        </div>
+      <!-- ── KPIs contextuais por aba ── -->
+      <div id="dash-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:24px;">
+        ${buildKpiHtml(all, reqSubTab)}
       </div>
 
       <!-- ── BUSCA ── -->
@@ -1665,17 +2108,16 @@ async function renderRequests(){
       <div id="trackResult"></div>
 
       <!-- ── LISTAS ── -->
+      ${reqSubTab==='pendentes' ? `
       <div id="sec-aberta-title" class="section-title">Pendente — sem responsável (${abertas.length})</div>
       <div id="sec-aberta">
         ${abertas.length ? abertas.map(r=>reqCardHtml(r,true)).join('') : '<div class="empty-state">Nenhuma solicitação pendente 🎉</div>'}
       </div>
-
       <div id="sec-and-title" class="section-title" style="margin-top:24px;">Em andamento — atribuídas (${andamento.length})</div>
       <div id="sec-andamento">
         ${andamento.length ? andamento.map(r=>reqCardHtml(r,true)).join('') : '<div class="empty-state">Nenhuma em andamento.</div>'}
-      </div>
-
-      <div id="sec-con-title" class="section-title" style="margin-top:24px;">Concluídas (${concluidas.length})</div>
+      </div>` : `
+      <div id="sec-con-title" class="section-title">Concluídas (${concluidas.length})</div>
       <div id="sec-concluida">
         ${concluidas.length ? concluidas.map(r=>reqCardHtml(r,false)).join('') : '<div class="empty-state">Nenhuma concluída ainda.</div>'}
       </div>
@@ -1684,6 +2126,7 @@ async function renderRequests(){
       <div id="sec-excluida" style="opacity:.6;">
         ${excluidas.map(r=>reqCardHtml(r,false)).join('')}
       </div>` : ''}
+      `}
     `;
     content.innerHTML=html;
 
@@ -1741,10 +2184,14 @@ function gaugeSvg(pct){
 }
 
 async function renderReport(){
+  // Proteção de rota — redireciona para login se não autenticado
+  const _users = await (async()=>{ try{ const s=await window.storage.get('system:users',true); return s?JSON.parse(s.value):[]; }catch(e){return [];} })();
+  if(_users.length > 0 && !currentUser){ await renderUserLogin(); return; }
+
   const app=document.getElementById('app');
   app.innerHTML=`
     <div class="req-tabs" style="margin-bottom:18px;">
-      <button id="repSecCL" class="${reportSection==='checklist'?'active':''}">Checklist de Limpeza</button>
+      <button id="repSecCL" class="${reportSection==='checklist'?'active':''}">Plano de Limpeza</button>
       <button id="repSecRQ" class="${reportSection==='requests'?'active':''}">Solicitações</button>
     </div>
     <div id="repContent"><div class="loading">Calculando...</div></div>`;
@@ -1758,179 +2205,367 @@ async function renderReport(){
 
 async function renderReportChecklist(){
   const content=document.getElementById('repContent');
-  content.innerHTML='<div class="loading">Calculando aderência...</div>';
+  content.innerHTML='<div class="loading">Calculando cumprimento do plano...</div>';
   const dates=getDatesForPeriod();
   const dataByDate={};
   for(const d of dates){const ds=dateStr(d);dataByDate[ds]=await loadDay(ds);}
 
-  // Acumuladores globais e por turno
-  let totalAll=0,doneAll=0;
-  const turnAcc={};TURNS.forEach(t=>turnAcc[t.key]={total:0,done:0});
+  // ── Helpers de pontualidade ──────────────────────────────────────────────
+  // Reutiliza occDeadline existente para classificar cada chip:
+  // NO HORÁRIO:  executado && entry.ts <= deadline
+  // COM ATRASO:  executado && entry.ts > deadline && entry.ts <= deadline + 2h
+  // NÃO EXEC:    não executado && agora > deadline + 2h  (janela encerrada)
+  // PENDENTE:    não executado && ainda dentro da janela
+  function classifyOcc(loc, turnKey, idx, date, entry){
+    const st = entry.state || 'pending';
+    const dl = occDeadline(loc, turnKey, idx, date);
+    if(!dl) return st==='done' ? 'ontime' : 'pending';
+    const dlMs = dl.getTime();
+    const tol = 2*3600000;
+    if(st==='done'){
+      return entry.ts <= dlMs ? 'ontime' : 'late';
+    } else {
+      const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+      // Só considera não-exec se for hoje e janela fechou; para datas passadas sempre não-exec
+      const today = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'}));
+      const isToday = date.getDate()===today.getDate()&&date.getMonth()===today.getMonth()&&date.getFullYear()===today.getFullYear();
+      if(isToday){
+        return nowMs > dlMs+tol ? 'notdone' : 'pending';
+      } else {
+        return 'notdone'; // data passada sem marcação = não executado
+      }
+    }
+  }
+  function emptyAcc(){ return {total:0,ontime:0,late:0,notdone:0,pending:0}; }
+  function accPct(a,field){ return a.total?Math.round(a[field]/a.total*100):0; }
+  function addToAcc(acc, cls){ acc.total++; if(cls in acc) acc[cls]++; }
 
-  // T1 (diurno 7h-19h): T1D=Par, T2D=Ímpar | T2 (noturno 19h-7h): T1N=Par, T2N=Ímpar
-  const shift1Keys=['T1D','T1N']; // Par: T1 Par + T2 Par (dias pares)
-  const shift2Keys=['T2D','T2N']; // Ímpar: T1 Ímpar + T2 Ímpar (dias ímpares)
-  const s1Acc={total:0,done:0}, s2Acc={total:0,done:0};
-  const parAcc={total:0,done:0}, imparAcc={total:0,done:0};
-  // Acumuladores individuais por coluna
-  const colAcc={T1D:{total:0,done:0},T2D:{total:0,done:0},T1N:{total:0,done:0},T2N:{total:0,done:0}};
-
-  // Detalhamento por dia: para cada dia, quebra em T1 e T2
-  const dailyRows=[];
+  // ── Acumuladores ─────────────────────────────────────────────────────────
+  const globalAcc = emptyAcc();
+  const turnAcc = {}; TURNS.forEach(t=>turnAcc[t.key]=emptyAcc());
+  const dailyRows = [];
 
   dates.forEach(d=>{
-    const ds=dateStr(d),data=dataByDate[ds];
-    let dTotal=0,dDone=0;
-    const dT1={total:0,done:0}, dT2={total:0,done:0};
+    const ds=dateStr(d), data=dataByDate[ds];
+    // Para modo DIA: usar só turnos ativos do dia
+    const turnsForDay = reportPeriod==='day' ? activeTurns(d) : TURNS;
+    const dayAcc = emptyAcc();
+    const perTurnDay = {};
+    turnsForDay.forEach(t=>{ perTurnDay[t.key]=emptyAcc(); });
 
     LOCATIONS.forEach(loc=>{
-      TURNS.forEach(t=>{
+      turnsForDay.forEach(t=>{
         const n=resolveFreq(loc,t.key,d);
         for(let i=0;i<n;i++){
-          const k=loc.name+'|'+t.key+'|'+i,st=getEntry(data,k).state;
-          const isDone=st==='done';
-          dTotal++;turnAcc[t.key].total++;
-          if(isDone){dDone++;turnAcc[t.key].done++;}
-          if(shift1Keys.includes(t.key)){dT1.total++;s1Acc.total++;if(isDone){dT1.done++;s1Acc.done++;}}
-          else{dT2.total++;s2Acc.total++;if(isDone){dT2.done++;s2Acc.done++;}}
-          colAcc[t.key].total++;if(isDone)colAcc[t.key].done++;
-          if(['T1D','T1N'].includes(t.key)){parAcc.total++;if(isDone)parAcc.done++;}
-          else{imparAcc.total++;if(isDone)imparAcc.done++;}
+          const k=loc.name+'|'+t.key+'|'+i;
+          const entry=getEntry(data,k);
+          const cls=classifyOcc(loc,t.key,i,d,entry);
+          addToAcc(globalAcc,cls);
+          addToAcc(dayAcc,cls);
+          addToAcc(turnAcc[t.key],cls);
+          addToAcc(perTurnDay[t.key],cls);
         }
       });
     });
-    totalAll+=dTotal;doneAll+=dDone;
-    dailyRows.push({
-      d,
-      total:dTotal,done:dDone,pct:dTotal?Math.round(dDone/dTotal*100):null,
-      t1:dT1,t2:dT2
-    });
+    dailyRows.push({d, acc:dayAcc, perTurn:perTurnDay, turns:turnsForDay});
   });
 
-  const overallPct=totalAll?Math.round(doneAll/totalAll*100):0;
-  const meetsGoal=overallPct>=GOAL_PCT,gap=GOAL_PCT-overallPct;
-  const s1Pct=s1Acc.total?Math.round(s1Acc.done/s1Acc.total*100):0;
-  const s2Pct=s2Acc.total?Math.round(s2Acc.done/s2Acc.total*100):0;
-  const parPct=parAcc.total?Math.round(parAcc.done/parAcc.total*100):0;
-  const imparPct=imparAcc.total?Math.round(imparAcc.done/imparAcc.total*100):0;
+  // ── Labels e cores ───────────────────────────────────────────────────────
+  const overallPct = globalAcc.total ? Math.round((globalAcc.ontime+globalAcc.late)/globalAcc.total*100) : 0;
+  const ontimePct  = accPct(globalAcc,'ontime');
+  const latePct    = accPct(globalAcc,'late');
+  const notdonePct = accPct(globalAcc,'notdone');
+  const meetsGoal  = overallPct >= GOAL_PCT;
+  const gap        = GOAL_PCT - overallPct;
 
   let periodLabel='';
-  if(reportPeriod==='day') periodLabel=fmtBR(reportDate);
-  else if(reportPeriod==='week'){
+  if(reportPeriod==='day'){
+    const isPar = reportDate.getDate()%2===0;
+    const turnLabels = activeTurns(reportDate).map(t=>t.label).join(' · ');
+    periodLabel=`${fmtBR(reportDate)} <span style="font-size:12px;color:var(--text-dim);font-weight:400;">— Turnos previstos: ${turnLabels}</span>`;
+  } else if(reportPeriod==='week'){
     const monday=startOfWeek(reportDate),sunday=new Date(monday);sunday.setDate(sunday.getDate()+6);
     periodLabel='Semana de '+fmtBR(monday)+' a '+fmtBR(sunday);
   } else periodLabel=monthLabel(reportDate);
 
-  function pctColor(p){return p===null?'var(--text-dim)':p>=GOAL_PCT?'var(--ok)':'var(--bad)';}
-  function pctLabel(p){return p===null?'—':p+'%';}
+  function pctColor(p){ return p===null?'var(--text-dim)':p>=GOAL_PCT?'var(--ok)':'var(--bad)'; }
+  function pctLabel(p){ return p===null?'—':p+'%'; }
 
+  // ── HTML ─────────────────────────────────────────────────────────────────
   let html=`
     <div class="goal-card">
-      <div class="gauge">${gaugeSvg(overallPct)}<div class="gauge-value"><div class="pct">${overallPct}%</div><div class="lbl">Aderência</div></div></div>
+      <div class="gauge">${gaugeSvg(overallPct)}<div class="gauge-value"><div class="pct">${overallPct}%</div><div class="lbl">Cumprimento</div></div></div>
       <div class="goal-info">
         <h3>${periodLabel}</h3>
-        <p>Meta: <strong>${GOAL_PCT}%</strong>. Concluídas <strong>${doneAll}</strong> de <strong>${totalAll}</strong> limpezas previstas.</p>
+        <p>Meta: <strong>${GOAL_PCT}%</strong>. Executadas <strong>${globalAcc.ontime+globalAcc.late}</strong> de <strong>${globalAcc.total}</strong> atividades previstas no plano.</p>
         <span class="status-pill ${meetsGoal?'ok':'warn'}">${meetsGoal?'Meta atingida ✓':`Abaixo da meta (faltam ${gap}p.p.)`}</span>
       </div>
     </div>
 
-    <div class="stat-grid">
-      <div class="stat-box"><div class="num">${totalAll}</div><div class="lbl">Previstas</div></div>
-      <div class="stat-box"><div class="num">${doneAll}</div><div class="lbl">Concluídas</div></div>
-      <div class="stat-box"><div class="num">${totalAll-doneAll}</div><div class="lbl">Não realizadas</div></div>
-      <div class="stat-box"><div class="num">${dates.length}</div><div class="lbl">${reportPeriod==='day'?'Dia':'Dias no período'}</div></div>
-    </div>
-
-    <div class="section-title">Aderência por turno (período)</div>
-    <div class="turn-breakdown">
-      <div class="turn-mini">
-        <div class="tlabel" style="color:#3fd6c9;">Par — T1 Par + T2 Par (dias pares)</div>
-        <div class="mini-track"><div class="mini-fill ${s1Pct<GOAL_PCT?'warn':''}" style="width:${s1Pct}%"></div></div>
-        <div class="tpct" style="color:${s1Pct>=GOAL_PCT?'var(--ok)':'var(--bad)'};">${s1Pct}% <span style="color:var(--text-dim);font-weight:400;">(${s1Acc.done}/${s1Acc.total})</span></div>
+    <!-- KPIs de pontualidade -->
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:20px;">
+      <div class="stat-box">
+        <div class="num">${globalAcc.total}</div>
+        <div class="lbl">Planejadas</div>
       </div>
-      <div class="turn-mini">
-        <div class="tlabel" style="color:#a78bfa;">Ímpar — T1 Ímpar + T2 Ímpar (dias ímpares)</div>
-        <div class="mini-track"><div class="mini-fill ${s2Pct<GOAL_PCT?'warn':''}" style="width:${s2Pct}%"></div></div>
-        <div class="tpct" style="color:${s2Pct>=GOAL_PCT?'var(--ok)':'var(--bad)'};">${s2Pct}% <span style="color:var(--text-dim);font-weight:400;">(${s2Acc.done}/${s2Acc.total})</span></div>
+      <div class="stat-box">
+        <div class="num" style="color:var(--ok);">${globalAcc.ontime}</div>
+        <div class="lbl">No horário</div>
+        <div style="font-size:12px;color:var(--ok);margin-top:2px;">${ontimePct}%</div>
       </div>
+      <div class="stat-box">
+        <div class="num" style="color:var(--amber);">${globalAcc.late}</div>
+        <div class="lbl">Com atraso</div>
+        <div style="font-size:12px;color:var(--amber);margin-top:2px;">${latePct}%</div>
+      </div>
+      <div class="stat-box">
+        <div class="num" style="color:var(--bad);">${globalAcc.notdone}</div>
+        <div class="lbl">Não executadas</div>
+        <div style="font-size:12px;color:var(--bad);margin-top:2px;">${notdonePct}%</div>
+      </div>
+      ${globalAcc.pending>0?`<div class="stat-box"><div class="num" style="color:var(--text-dim);">${globalAcc.pending}</div><div class="lbl">Em andamento</div></div>`:''}
     </div>`;
 
-  // Detalhamento por turno individual (Par/Ímpar)
-  // Colunas na ordem: T1 Par, T2 Par / T1 Ímpar, T2 Ímpar
+  // ── Detalhamento por turno ────────────────────────────────────────────────
   const colOrder=[
     {key:'T1D', label:'T1 Par',   color:'#3fd6c9'},
     {key:'T1N', label:'T2 Par',   color:'#3fd6c9'},
     {key:'T2D', label:'T1 Ímpar', color:'#a78bfa'},
     {key:'T2N', label:'T2 Ímpar', color:'#a78bfa'},
   ];
-  html+=`<div class="section-title">Aderência por coluna</div>
-    <div class="turn-breakdown">`;
-  colOrder.forEach(col=>{
-    const a=colAcc[col.key],p=a.total?Math.round(a.done/a.total*100):0;
-    html+=`<div class="turn-mini">
-      <div class="tlabel" style="color:${col.color};">${col.label}</div>
-      <div class="mini-track"><div class="mini-fill ${p<GOAL_PCT?'warn':''}" style="width:${p}%"></div></div>
-      <div class="tpct" style="color:${p>=GOAL_PCT?'var(--ok)':'var(--bad)'};">${p}% <span style="color:var(--text-dim);font-weight:400;">(${a.done}/${a.total})</span></div>
+  // No modo dia, mostrar só os turnos do dia selecionado
+  const colsToShow = reportPeriod==='day'
+    ? colOrder.filter(c=>activeTurns(reportDate).some(t=>t.key===c.key))
+    : colOrder;
+
+  html+=`<div class="section-title">Detalhamento por turno — Cumprimento do Plano</div>
+    <div class="turn-breakdown" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">`;
+
+  colsToShow.forEach(col=>{
+    const a=turnAcc[col.key];
+    if(!a||a.total===0) return;
+    const execPct=a.total?Math.round((a.ontime+a.late)/a.total*100):0;
+    const pontPct=a.total?Math.round(a.ontime/a.total*100):0;
+    html+=`<div class="turn-mini" style="border-left:3px solid ${col.color};">
+      <div class="tlabel" style="color:${col.color};margin-bottom:10px;">${col.label}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+        <div><div style="font-size:18px;font-weight:700;color:var(--text);">${a.total}</div><div style="color:var(--text-dim);">Planejadas</div></div>
+        <div><div style="font-size:18px;font-weight:700;color:var(--ok);">${a.ontime}</div><div style="color:var(--ok);">No horário</div></div>
+        <div><div style="font-size:18px;font-weight:700;color:var(--amber);">${a.late}</div><div style="color:var(--amber);">Com atraso</div></div>
+        <div><div style="font-size:18px;font-weight:700;color:var(--bad);">${a.notdone}</div><div style="color:var(--bad);">Não exec.</div></div>
+      </div>
+      <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px;display:flex;justify-content:space-between;font-size:12px;">
+        <span>Cumprimento: <strong style="color:${execPct>=GOAL_PCT?'var(--ok)':'var(--bad)'};">${execPct}%</strong></span>
+        <span>Pontualidade: <strong style="color:${pontPct>=GOAL_PCT?'var(--ok)':'var(--amber)'};">${pontPct}%</strong></span>
+      </div>
     </div>`;
   });
   html+=`</div>`;
 
-  // Tabela por dia com T1 e T2
+  // ── Tabela diária (semana/mês) ────────────────────────────────────────────
   if(reportPeriod!=='day'){
     const dayNames=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
-    html+=`<div class="section-title">Detalhamento diário — T1 e T2</div>
+    html+=`<div class="section-title">Detalhamento diário</div>
       <div class="tablewrap"><table class="report-table"><thead><tr>
-        <th>Data</th>
-        <th class="num" style="color:#3fd6c9;">Par Concl.</th>
-        <th class="num" style="color:#3fd6c9;">Par Prev.</th>
-        <th class="num" style="color:#3fd6c9;">Par Ader.</th>
-        <th class="num" style="color:#a78bfa;">Ímpar Concl.</th>
-        <th class="num" style="color:#a78bfa;">Ímpar Prev.</th>
-        <th class="num" style="color:#a78bfa;">Ímpar Ader.</th>
-        <th class="num">Total</th>
-        <th class="num">Ader. Dia</th>
+        <th>Data</th><th>Turnos</th>
+        <th class="num">Plan.</th>
+        <th class="num" style="color:var(--ok);">No horário</th>
+        <th class="num" style="color:var(--amber);">C/ atraso</th>
+        <th class="num" style="color:var(--bad);">Não exec.</th>
+        <th class="num">Cumprimento</th>
+        <th class="num">Pontualidade</th>
       </tr></thead><tbody>`;
     dailyRows.forEach(r=>{
-      const p1=r.t1.total?Math.round(r.t1.done/r.t1.total*100):null;
-      const p2=r.t2.total?Math.round(r.t2.done/r.t2.total*100):null;
+      const a=r.acc;
+      const execP=a.total?Math.round((a.ontime+a.late)/a.total*100):null;
+      const pontP=a.total?Math.round(a.ontime/a.total*100):null;
       const dow=dayNames[r.d.getDay()];
+      const turnLabel=r.turns.map(t=>t.label).join(', ');
       html+=`<tr>
         <td style="white-space:nowrap;">${dow} ${fmtBR(r.d)}</td>
-        <td class="num">${r.t1.done}</td>
-        <td class="num">${r.t1.total}</td>
-        <td class="num" style="color:${pctColor(p1)};font-weight:700;">${pctLabel(p1)}</td>
-        <td class="num">${r.t2.done}</td>
-        <td class="num">${r.t2.total}</td>
-        <td class="num" style="color:${pctColor(p2)};font-weight:700;">${pctLabel(p2)}</td>
-        <td class="num">${r.done}/${r.total}</td>
-        <td class="num" style="color:${pctColor(r.pct)};font-weight:700;">${pctLabel(r.pct)}</td>
+        <td style="font-size:11px;color:var(--text-dim);">${turnLabel}</td>
+        <td class="num">${a.total}</td>
+        <td class="num" style="color:var(--ok);">${a.ontime}</td>
+        <td class="num" style="color:var(--amber);">${a.late}</td>
+        <td class="num" style="color:var(--bad);">${a.notdone}</td>
+        <td class="num" style="color:${pctColor(execP)};font-weight:700;">${pctLabel(execP)}</td>
+        <td class="num" style="color:${pctColor(pontP)};font-weight:700;">${pctLabel(pontP)}</td>
       </tr>`;
     });
     html+=`</tbody></table></div>`;
   } else {
-    // Visão do dia: mostra T1 e T2 lado a lado
+    // Modo DIA: card por turno com pontualidade detalhada
     const r=dailyRows[0];
     if(r){
-      const p1=r.t1.total?Math.round(r.t1.done/r.t1.total*100):null;
-      const p2=r.t2.total?Math.round(r.t2.done/r.t2.total*100):null;
-      html+=`<div class="section-title">Detalhamento do dia</div>
-        <div class="turn-breakdown">
-          <div class="turn-mini" style="flex:1;">
-            <div class="tlabel" style="color:#3fd6c9;">Par (T1 Par + T2 Par)</div>
-            <div class="mini-track"><div class="mini-fill ${p1!==null&&p1<GOAL_PCT?'warn':''}" style="width:${p1||0}%"></div></div>
-            <div class="tpct" style="color:${pctColor(p1)};">${pctLabel(p1)} <span style="color:var(--text-dim);font-weight:400;">(${r.t1.done} concl. de ${r.t1.total} prev.)</span></div>
+      html+=`<div class="section-title">Detalhamento do dia — ${fmtBR(r.d)}</div>
+        <div class="turn-breakdown" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">`;
+      r.turns.forEach(t=>{
+        const a=r.perTurn[t.key]||emptyAcc();
+        if(a.total===0) return;
+        const col=colOrder.find(c=>c.key===t.key);
+        const execPct=a.total?Math.round((a.ontime+a.late)/a.total*100):0;
+        const pontPct=a.total?Math.round(a.ontime/a.total*100):0;
+        html+=`<div class="turn-mini" style="border-left:3px solid ${col?.color||'var(--teal)'};">
+          <div class="tlabel" style="color:${col?.color||'var(--teal)'};margin-bottom:10px;">${t.label}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+            <div><div style="font-size:18px;font-weight:700;color:var(--text);">${a.total}</div><div style="color:var(--text-dim);">Planejadas</div></div>
+            <div><div style="font-size:18px;font-weight:700;color:var(--ok);">${a.ontime}</div><div style="color:var(--ok);">No horário</div></div>
+            <div><div style="font-size:18px;font-weight:700;color:var(--amber);">${a.late}</div><div style="color:var(--amber);">Com atraso</div></div>
+            <div><div style="font-size:18px;font-weight:700;color:var(--bad);">${a.notdone}</div><div style="color:var(--bad);">Não exec.</div></div>
           </div>
-          <div class="turn-mini" style="flex:1;">
-            <div class="tlabel" style="color:#a78bfa;">Ímpar (T1 Ímpar + T2 Ímpar)</div>
-            <div class="mini-track"><div class="mini-fill ${p2!==null&&p2<GOAL_PCT?'warn':''}" style="width:${p2||0}%"></div></div>
-            <div class="tpct" style="color:${pctColor(p2)};">${pctLabel(p2)} <span style="color:var(--text-dim);font-weight:400;">(${r.t2.done} concl. de ${r.t2.total} prev.)</span></div>
+          <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px;display:flex;justify-content:space-between;font-size:12px;">
+            <span>Cumprimento: <strong style="color:${execPct>=GOAL_PCT?'var(--ok)':'var(--bad)'};">${execPct}%</strong></span>
+            <span>Pontualidade: <strong style="color:${pontPct>=GOAL_PCT?'var(--ok)':'var(--amber)'};">${pontPct}%</strong></span>
           </div>
         </div>`;
+      });
+      html+=`</div>`;
     }
   }
 
+  // ── Filtros da tabela detalhada ─────────────────────────────────────────
+  html += `
+    <div class="section-title" style="margin-top:24px;">Tabela detalhada — drill-down operacional</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;">
+      <div style="font-size:12px;font-weight:600;color:var(--text-dim);width:100%;margin-bottom:4px;">Filtros da tabela:</div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:11px;color:var(--text-dim);">Turno</label>
+        <select id="dtFilterTurn" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;font-family:inherit;">
+          <option value="">Todos</option>
+          ${colsToShow.map(col=>`<option value="${col.key}">${col.label}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:11px;color:var(--text-dim);">Status</label>
+        <select id="dtFilterStatus" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;font-family:inherit;">
+          <option value="">Todos</option>
+          <option value="ontime">No horário</option>
+          <option value="late">Com atraso</option>
+          <option value="notdone">Não executado</option>
+          <option value="pending">Pendente</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:11px;color:var(--text-dim);">Local</label>
+        <input type="text" id="dtFilterLocal" placeholder="Filtrar local..." style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;font-family:inherit;width:160px;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:11px;color:var(--text-dim);">Executor</label>
+        <input type="text" id="dtFilterExec" placeholder="Filtrar executor..." style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;font-family:inherit;width:140px;">
+      </div>
+      <button id="dtApply" class="btn small" style="align-self:flex-end;">Aplicar</button>
+      <button id="dtClear" class="btn small secondary" style="align-self:flex-end;">Limpar</button>
+      <button id="dtExport" class="btn small secondary" style="align-self:flex-end;margin-left:auto;">⬇ Exportar CSV</button>
+    </div>
+    <div id="dtTableWrap"></div>
+  `;
+
   content.innerHTML=html;
+
+  // ── Monta registros detalhados ────────────────────────────────────────────
+  function buildDetailRows(fTurn, fStatus, fLocal, fExec){
+    const rows = [];
+    dates.forEach(d=>{
+      const ds = dateStr(d);
+      const data = dataByDate[ds];
+      const turnsForDay = reportPeriod==='day' ? activeTurns(d) : activeTurns(d); // sempre usa turnos do dia
+      const dayNames2=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+      turnsForDay.forEach(t=>{
+        if(fTurn && t.key!==fTurn) return;
+        const col = [{key:'T1D',label:'T1 Par'},{key:'T1N',label:'T2 Par'},{key:'T2D',label:'T1 Ímpar'},{key:'T2N',label:'T2 Ímpar'}].find(x=>x.key===t.key);
+        LOCATIONS.forEach(loc=>{
+          if(fLocal && !loc.name.toLowerCase().includes(fLocal.toLowerCase())) return;
+          const n = resolveFreq(loc,t.key,d);
+          for(let i=0;i<n;i++){
+            const k = loc.name+'|'+t.key+'|'+i;
+            const entry = getEntry(data,k);
+            const cls = classifyOcc(loc,t.key,i,d,entry);
+            if(fStatus && cls!==fStatus) return;
+            const exec = entry.ts ? (entry.emp||'—') : '—';
+            if(fExec && exec!=='—' && !exec.toLowerCase().includes(fExec.toLowerCase())) return;
+            if(fExec && exec==='—') return;
+            const dl = occDeadline(loc,t.key,i,d);
+            rows.push({
+              data: dayNames2[d.getDay()]+' '+fmtBR(d),
+              turno: col?.label||t.label,
+              local: loc.name,
+              planejado: dl ? fmtTime(dl.getTime()) : '—',
+              limite: dl ? fmtTime(dl.getTime()+2*3600000) : '—',
+              executado: entry.ts ? fmtTime(entry.ts) : '—',
+              executor: exec,
+              status: cls,
+            });
+          }
+        });
+      });
+    });
+    return rows;
+  }
+
+  const statusLabel = {ontime:'No horário', late:'Com atraso', notdone:'Não executado', pending:'Pendente'};
+  const statusColor = {ontime:'var(--ok)', late:'var(--amber)', notdone:'var(--bad)', pending:'var(--text-dim)'};
+
+  function renderDetailTable(rows){
+    const wrap = document.getElementById('dtTableWrap');
+    if(!rows.length){ wrap.innerHTML='<div class="empty-state">Nenhum registro para os filtros selecionados.</div>'; return; }
+    wrap.innerHTML=`<div class="tablewrap"><table class="report-table">
+      <thead><tr>
+        <th>Data</th><th>Turno</th><th>Local</th>
+        <th class="num">Planejado</th><th class="num">Limite</th><th class="num">Executado</th>
+        <th>Executor</th><th>Status</th>
+      </tr></thead><tbody>
+      ${rows.map(r=>`<tr>
+        <td style="white-space:nowrap;">${r.data}</td>
+        <td>${r.turno}</td>
+        <td>${r.local}</td>
+        <td class="num" style="font-family:monospace;">${r.planejado}</td>
+        <td class="num" style="font-family:monospace;">${r.limite}</td>
+        <td class="num" style="font-family:monospace;color:${r.executado!=='—'?'var(--teal-bright)':'var(--text-dim)'};">${r.executado}</td>
+        <td style="color:${r.executor!=='—'?'var(--text)':'var(--text-dim)'};">${r.executor}</td>
+        <td><span style="color:${statusColor[r.status]};font-weight:600;font-size:12px;">${statusLabel[r.status]||r.status}</span></td>
+      </tr>`).join('')}
+      </tbody></table></div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:8px;">${rows.length} registro(s) encontrado(s)</div>`;
+  }
+
+  // Renderiza tabela inicial com todos os registros
+  let currentRows = buildDetailRows('','','','');
+  renderDetailTable(currentRows);
+
+  // Wire filtros
+  document.getElementById('dtApply').addEventListener('click', ()=>{
+    const fTurn   = document.getElementById('dtFilterTurn').value;
+    const fStatus = document.getElementById('dtFilterStatus').value;
+    const fLocal  = document.getElementById('dtFilterLocal').value.trim();
+    const fExec   = document.getElementById('dtFilterExec').value.trim();
+    currentRows = buildDetailRows(fTurn, fStatus, fLocal, fExec);
+    renderDetailTable(currentRows);
+  });
+
+  document.getElementById('dtClear').addEventListener('click', ()=>{
+    document.getElementById('dtFilterTurn').value='';
+    document.getElementById('dtFilterStatus').value='';
+    document.getElementById('dtFilterLocal').value='';
+    document.getElementById('dtFilterExec').value='';
+    currentRows = buildDetailRows('','','','');
+    renderDetailTable(currentRows);
+  });
+
+  // Exportar CSV respeitando filtros aplicados
+  document.getElementById('dtExport').addEventListener('click', ()=>{
+    const header = ['Data','Turno','Local','Planejado','Limite','Executado','Executor','Status'];
+    const rows = currentRows.map(r=>[r.data,r.turno,r.local,r.planejado,r.limite,r.executado,r.executor,statusLabel[r.status]||r.status]);
+    const csv = [header,...rows].map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url;
+    a.download='checklist_'+dateStr(reportDate||new Date())+'.csv';
+    a.click(); URL.revokeObjectURL(url);
+  });
 }
+
+
+
 
 async function renderReportRequests(){
   const content=document.getElementById('repContent');
@@ -2231,6 +2866,8 @@ document.getElementById('navAdmin').addEventListener('click', ()=>{
   if(isAdmin){ if(confirm('Sair do modo administrador?')) adminLogout(); }
   else tryAdminLogin();
 });
+
+
 document.getElementById('navChecklist').addEventListener('click', ()=>{
   section='checklist';
   document.getElementById('navChecklist').classList.add('active');
@@ -2395,9 +3032,278 @@ document.getElementById('navReport').addEventListener('click', ()=>{
   document.getElementById('navReport').classList.add('active');
   document.getElementById('navChecklist').classList.remove('active');
   document.getElementById('navRequests').classList.remove('active');
+  document.getElementById('navUsers').classList.remove('active');
   renderTopControls();
   renderReport();
 });
+
+document.getElementById('navUsers').addEventListener('click', ()=>{
+  section='users';
+  document.getElementById('navUsers').classList.add('active');
+  document.getElementById('navChecklist').classList.remove('active');
+  document.getElementById('navRequests').classList.remove('active');
+  document.getElementById('navReport').classList.remove('active');
+  renderTopControls();
+  renderUsers();
+});
+
+/* ===================== GESTÃO DE USUÁRIOS ===================== */
+async function renderUsers(){
+  if(!isAdmin){ renderChecklist(); return; }
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="loading">Carregando usuários...</div>';
+  let users = [];
+  try{ const snap=await window.storage.get('system:users',true); users=snap?JSON.parse(snap.value):[]; }catch(e){ users=[]; }
+  const sorted=[...users].sort((a,b)=>a.nome.localeCompare(b.nome));
+  const admins=sorted.filter(u=>u.perfil==='admin');
+  const ops=sorted.filter(u=>u.perfil!=='admin');
+  function userRow(u){
+    const ri=users.findIndex(x=>x.nome===u.nome); const isAdm=u.perfil==='admin';
+    return `<tr style="border-bottom:1px solid var(--line);">
+      <td style="padding:11px 16px;"><div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;border-radius:50%;background:${isAdm?'#e3b341':'var(--teal)'};color:${isAdm?'#000':'#fff'};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${u.nome.charAt(0).toUpperCase()}</div>
+        <div style="font-size:13px;font-weight:600;">${u.nome}</div>
+      </div></td>
+      <td style="padding:11px 16px;"><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;${isAdm?'background:rgba(227,179,65,.15);color:#e3b341;':'background:rgba(31,138,140,.12);color:var(--teal-bright);'}">${isAdm?'👑 Admin':'👤 Operador'}</span></td>
+      <td style="padding:11px 16px;"><span style="font-size:12px;color:var(--text-dim);background:var(--panel-2);padding:3px 10px;border-radius:6px;letter-spacing:1px;">••••</span></td>
+      <td style="padding:11px 16px;text-align:right;white-space:nowrap;">
+        <button class="btn small secondary" data-editperfil="${ri}" style="margin-right:6px;" title="Alterar perfil">👤</button>
+        <button class="btn small secondary" data-edit="${ri}" style="margin-right:6px;" title="Alterar PIN">🔑</button>
+        <button class="btn small secondary" style="color:var(--bad);border-color:var(--bad);" data-del="${ri}" title="Excluir">✕</button>
+      </td></tr>`;
+  }
+  function tbl(list,title,color){
+    if(!list.length) return '';
+    return `<div style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.8px;margin:20px 0 8px;">${title} (${list.length})</div>
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:4px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--line);background:var(--panel-2);">
+          <th style="padding:9px 16px;text-align:left;font-size:11px;color:var(--text-dim);">NOME</th>
+          <th style="padding:9px 16px;text-align:left;font-size:11px;color:var(--text-dim);">PERFIL</th>
+          <th style="padding:9px 16px;text-align:left;font-size:11px;color:var(--text-dim);">PIN</th>
+          <th style="padding:9px 16px;text-align:right;font-size:11px;color:var(--text-dim);">AÇÕES</th>
+        </tr></thead>
+        <tbody>${list.map(userRow).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+  app.innerHTML=`<div style="max-width:700px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+      <div><div style="font-size:18px;font-weight:700;">👥 Usuários</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-top:2px;">${users.length} usuário${users.length!==1?'s':''} · ${admins.length} admin · ${ops.length} operador${ops.length!==1?'es':''}</div></div>
+      <button class="btn" id="btnShowForm">+ Novo usuário</button>
+    </div>
+    <div class="card" id="formCard" style="margin-bottom:20px;display:none;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:14px;">+ Novo usuário</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:3;min-width:160px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">NOME</label><input type="text" id="uNome" placeholder="Nome completo" style="width:100%;"></div>
+        <div style="flex:2;min-width:130px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">PIN</label><input type="text" id="uPin" placeholder="Mín. 4 caracteres" maxlength="8" style="width:100%;"></div>
+        <div style="flex:2;min-width:140px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">PERFIL</label>
+          <select id="uPerfil" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;">
+            <option value="operador">👤 Operador</option><option value="admin">👑 Admin</option>
+          </select></div>
+      </div>
+      <div id="uError" style="color:var(--bad);font-size:12.5px;min-height:16px;margin-top:10px;"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" id="uSave">Cadastrar</button><button class="btn secondary" id="btnHideForm">Cancelar</button></div>
+    </div>
+    ${tbl(admins,'👑 Administradores','#e3b341')}
+    ${tbl(ops,'👤 Operadores','var(--teal-bright)')}
+    ${!users.length?'<div class="empty-state">Nenhum usuário cadastrado ainda.</div>':''}
+  </div>`;
+  document.getElementById('btnShowForm').addEventListener('click',()=>{ document.getElementById('formCard').style.display=''; document.getElementById('btnShowForm').style.display='none'; document.getElementById('uNome').focus(); });
+  document.getElementById('btnHideForm')?.addEventListener('click',()=>{ document.getElementById('formCard').style.display='none'; document.getElementById('btnShowForm').style.display=''; });
+  document.getElementById('uSave').addEventListener('click',async()=>{
+    const nome=document.getElementById('uNome').value.trim(), pin=document.getElementById('uPin').value.trim(), perfil=document.getElementById('uPerfil').value, err=document.getElementById('uError');
+    if(!nome){err.textContent='Informe o nome.';return;}
+    if(pin.length<4){err.textContent='PIN deve ter pelo menos 4 caracteres.';return;}
+    if(users.find(u=>u.nome.toLowerCase()===nome.toLowerCase())){err.textContent='Já existe um usuário com esse nome.';return;}
+    if(users.find(u=>u.pin===pin)){err.textContent='Esse PIN já está em uso.';return;}
+    err.textContent=''; users.push({nome,pin,perfil});
+    await window.storage.set('system:users',JSON.stringify(users),true); renderUsers();
+  });
+  app.querySelectorAll('[data-editperfil]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const idx=parseInt(btn.getAttribute('data-editperfil'));
+      const u=users[idx];
+      const novo=u.perfil==='admin'?'operador':'admin';
+      const label=novo==='admin'?'👑 Administrador':'👤 Operador';
+      if(!confirm('Alterar perfil de "'+u.nome+'" para '+label+'?')) return;
+      users[idx].perfil=novo;
+      await window.storage.set('system:users',JSON.stringify(users),true);
+      renderUsers();
+    });
+  });
+
+  app.querySelectorAll('[data-edit]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const idx=parseInt(btn.getAttribute('data-edit'));
+      const np=prompt('Novo PIN para "'+users[idx].nome+'" (mín. 4 caracteres):','');
+      if(!np||np.length<4){if(np!==null)alert('PIN muito curto.');return;}
+      users[idx].pin=np; await window.storage.set('system:users',JSON.stringify(users),true); renderUsers();
+    });
+  });
+  app.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const idx=parseInt(btn.getAttribute('data-del'));
+      if(!confirm('Excluir "'+users[idx].nome+'"?'))return;
+      users.splice(idx,1); await window.storage.set('system:users',JSON.stringify(users),true); renderUsers();
+    });
+  });
+}
+
+/* ===================== LOGIN DE USUÁRIO ===================== */
+async function ensureUserLogin(){
+  // Verifica se há usuários cadastrados
+  let users = [];
+  try{
+    const snap = await window.storage.get('system:users', true);
+    users = snap ? JSON.parse(snap.value) : [];
+  }catch(e){ users = []; }
+
+  // Se não há usuários cadastrados, mostra tela de login com aviso
+  if(users.length === 0){
+    await renderUserLogin(true); // true = modo sem usuários cadastrados
+    return;
+  }
+
+  // Sempre exige login — sem restauração automática de sessão
+  await renderUserLogin();
+}
+
+async function renderUserLogin(noUsers){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div style="min-height:80vh;display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:100%;max-width:360px;">
+        <div class="card" style="padding:32px 28px;">
+          ${noUsers?`<div style="background:rgba(227,179,65,.1);border:1px solid rgba(227,179,65,.3);border-radius:8px;padding:10px 14px;font-size:12px;color:#e3b341;margin-bottom:16px;text-align:center;">⚠️ Nenhum usuário cadastrado. Entre como Admin para configurar.</div>`:''}
+          <div style="text-align:center;margin-bottom:28px;">
+            <div style="font-size:32px;margin-bottom:10px;">🧹</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text);">Sistema de Limpeza</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Mercado Livre Betim — MG02</div>
+          </div>
+          <div class="form-row">
+            <label>Usuário</label>
+            <input type="text" id="loginNome" placeholder="Digite seu nome" autocomplete="username" style="width:100%;">
+          </div>
+          <div class="form-row">
+            <label>PIN</label>
+            <div style="position:relative;">
+              <input type="password" id="loginPin" placeholder="Mín. 4 caracteres" maxlength="8" autocomplete="current-password" style="width:100%;padding-right:44px;">
+              <button type="button" id="togglePin" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:17px;padding:0;line-height:1;" title="Mostrar/ocultar PIN">👁</button>
+            </div>
+          </div>
+          <div id="loginError" style="color:var(--bad);font-size:12.5px;min-height:18px;margin-bottom:10px;text-align:center;"></div>
+          <button class="btn" id="loginBtn" style="width:100%;padding:13px;font-size:15px;letter-spacing:.5px;">ENTRAR</button>
+          <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--text-dim);">Não tem acesso? Fale com o administrador.</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('togglePin').addEventListener('click', ()=>{
+    const inp = document.getElementById('loginPin');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    document.getElementById('togglePin').textContent = inp.type === 'password' ? '👁' : '🙈';
+  });
+
+  async function doLogin(){
+    const nome = document.getElementById('loginNome').value.trim();
+    const pin  = document.getElementById('loginPin').value.trim();
+    const err  = document.getElementById('loginError');
+    const btn  = document.getElementById('loginBtn');
+    if(!nome||!pin){ err.textContent='Preencha usuário e PIN.'; return; }
+    btn.disabled=true; btn.textContent='Verificando...'; err.textContent='';
+    try{
+      const snap = await window.storage.get('system:users', true);
+      const users = snap ? JSON.parse(snap.value) : [];
+      const found = users.find(u=>u.nome.toLowerCase()===nome.toLowerCase()&&u.pin===pin);
+      if(found){
+        currentUser=found; currentEmployee=found.nome;
+        isAdmin=(found.perfil==='admin');
+        await window.storage.set('userSession', JSON.stringify({...found, ts:Date.now()}), false);
+        await saveEmployee(found.nome);
+        if(isAdmin) showAdminBadge();
+        renderTopControls();
+        await renderChecklist();
+        updateNavAdminVisibility();
+        hideLoader();
+      } else {
+        err.textContent='Usuário ou PIN incorretos.';
+        btn.disabled=false; btn.textContent='ENTRAR';
+        document.getElementById('loginPin').value='';
+        document.getElementById('loginPin').focus();
+      }
+    }catch(e){
+      err.textContent='Erro ao conectar. Tente novamente.';
+      btn.disabled=false; btn.textContent='ENTRAR';
+    }
+  }
+
+  document.getElementById('loginBtn').addEventListener('click', doLogin);
+  document.getElementById('loginPin').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  document.getElementById('loginNome').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('loginPin').focus(); });
+  setTimeout(()=>{ const el=document.getElementById('loginNome'); if(el) el.focus(); }, 100);
+}
+
+/* ===================== ALTERAR PIN ===================== */
+function renderChangePinModal(){
+  // Modal overlay
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;width:340px;max-width:92vw;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:16px;">🔑 Alterar meu PIN</div>
+      <div class="form-row" style="margin-bottom:12px;">
+        <label style="font-size:12px;color:var(--text-dim);">PIN atual</label>
+        <input type="password" id="pinAtual" placeholder="Mín. 4 caracteres" maxlength="8"
+          style="width:100%;padding:9px 12px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:14px;font-family:inherit;">
+      </div>
+      <div class="form-row" style="margin-bottom:12px;">
+        <label style="font-size:12px;color:var(--text-dim);">Novo PIN</label>
+        <input type="password" id="pinNovo" placeholder="Mín. 4 caracteres" maxlength="8"
+          style="width:100%;padding:9px 12px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:14px;font-family:inherit;">
+      </div>
+      <div class="form-row" style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--text-dim);">Confirmar novo PIN</label>
+        <input type="password" id="pinConfirm" placeholder="Mín. 4 caracteres" maxlength="8"
+          style="width:100%;padding:9px 12px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:14px;font-family:inherit;">
+      </div>
+      <div id="pinError" style="color:var(--bad);font-size:12px;min-height:16px;margin-bottom:10px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button id="pinSave" class="btn" style="flex:1;">Salvar</button>
+        <button id="pinCancel" class="btn secondary" style="flex:1;">Cancelar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('pinCancel').addEventListener('click', ()=>overlay.remove());
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.getElementById('pinSave').addEventListener('click', async ()=>{
+    const atual   = document.getElementById('pinAtual').value.trim();
+    const novo    = document.getElementById('pinNovo').value.trim();
+    const confirm = document.getElementById('pinConfirm').value.trim();
+    const err     = document.getElementById('pinError');
+    if(!atual||!novo||!confirm){ err.textContent='Preencha todos os campos.'; return; }
+    if(atual !== currentUser?.pin){ err.textContent='PIN atual incorreto.'; return; }
+    if(!novo.length >= 4){ err.textContent='Novo PIN deve ter pelo menos 4 caracteres.'; return; }
+    if(novo !== confirm){ err.textContent='Os PINs não coincidem.'; return; }
+    err.textContent='';
+    try{
+      const snap = await window.storage.get('system:users', true);
+      const users = snap ? JSON.parse(snap.value) : [];
+      const idx = users.findIndex(u=>u.nome===currentUser.nome&&u.pin===currentUser.pin);
+      if(idx<0){ err.textContent='Usuário não encontrado.'; return; }
+      if(users.find((u,i)=>i!==idx&&u.pin===novo)){ err.textContent='Esse PIN já está em uso.'; return; }
+      users[idx].pin = novo;
+      currentUser.pin = novo;
+      await window.storage.set('system:users', JSON.stringify(users), true);
+      await window.storage.set('userSession', JSON.stringify(currentUser), false);
+      overlay.remove();
+      alert('✅ PIN alterado com sucesso!');
+    }catch(e){ err.textContent='Erro ao salvar. Tente novamente.'; }
+  });
+}
 
 /* ===================== MODO QUIOSQUE (QR Code) ===================== */
 async function renderKiosk(){
@@ -2640,14 +3546,6 @@ function kSwitchTab(tab){
 /* ===================== INIT ===================== */
 (async ()=>{
   await loadEmployee();
-  // Restaura sessão admin se ativa nas últimas 8h
-  try{
-    const sess = await window.storage.get('adminSession', false);
-    if(sess && (Date.now() - parseInt(sess.value)) < 8*60*60*1000){
-      isAdmin = true;
-      showAdminBadge();
-    }
-  }catch(e){}
   // Modo checklist mobile: ?mode=checklist
   const urlParams = new URLSearchParams(window.location.search);
   const isChecklistMode = urlParams.get('mode') === 'checklist';
@@ -2662,7 +3560,7 @@ function kSwitchTab(tab){
       }
     }
     renderTopControls();
-    await renderChecklist();
+    await ensureUserLogin();
     hideLoader();
   } else {
   // Modo quiosque: acessado via QR code (?tab=requests) → só formulário, sem nav
@@ -2674,11 +3572,404 @@ function kSwitchTab(tab){
     hideLoader();
   } else {
     renderTopControls();
-    await renderChecklist();
+    await ensureUserLogin();
     hideLoader();
   }
   } // fecha bloco else do checklist-mode
 })();
+
+
+
+/* ===================== EFETIVO ===================== */
+const CARGOS_EFETIVO = ['Operador de máquina','Descarte / Resíduos','Serviços Gerais','Encarregado','Supervisor','ASG de Refeitório'];
+const TURNO_LABELS = {T1D:'T1 Par (Diurno)', T1N:'T2 Par (Noturno)', T2D:'T1 Ímpar (Diurno)', T2N:'T2 Ímpar (Noturno)'};
+const TURNO_PREVISTO = {T1D:11, T1N:10, T2D:11, T2N:10};
+let efAbaAtiva = 'dia';
+
+async function loadEfetivo(ds){ try{ const s=await window.storage.get('efetivo:'+ds,true); return s?JSON.parse(s.value):{}; }catch(e){ return {}; } }
+async function saveEfetivo(ds,data){ try{ await window.storage.set('efetivo:'+ds,JSON.stringify(data),true); }catch(e){} }
+async function loadColaboradores(){
+  try{
+    const s = await window.storage.get('efetivo:colaboradores', true);
+    const existing = s ? JSON.parse(s.value) : [];
+    if(existing.length > 0) return existing;
+    const seed = [
+      {"nome":"ALAN DIEGO DE SOUZA","cargo":"","status":"ativo"},
+      {"nome":"ALEXANDRA SANTOS CARDOSO DORNE","cargo":"","status":"ativo"},
+      {"nome":"BEATRIZ ROLIM DA CUNHA","cargo":"","status":"ativo"},
+      {"nome":"CATIA INACIA DE LIMA","cargo":"","status":"ativo"},
+      {"nome":"CINTHIA MONTEIRO DE SOUZA","cargo":"","status":"ativo"},
+      {"nome":"CIRLENE DA SILVA","cargo":"","status":"ativo"},
+      {"nome":"CLAUDIA DIAS DA SILVA","cargo":"","status":"ativo"},
+      {"nome":"CRISTIANE TOMAZ NEVES","cargo":"","status":"ativo"},
+      {"nome":"EDIVANIA JOSE AVELINO","cargo":"","status":"ativo"},
+      {"nome":"EDIVANDA FELIPE SANTIAGO","cargo":"","status":"ativo"},
+      {"nome":"ELIANE VALERIA DE OLIVEIRA","cargo":"","status":"ativo"},
+      {"nome":"ESTELITA PAULINO DOS SANTOS","cargo":"","status":"ativo"},
+      {"nome":"HELENA ALVES DA SILVA","cargo":"","status":"ativo"},
+      {"nome":"ISAQUE DE OLIVEIRA SANTOS","cargo":"","status":"ativo"},
+      {"nome":"JOSE CELIO NEVES ROCHA SANTOS","cargo":"","status":"ativo"},
+      {"nome":"JOSANIA GONCALVES DA SILVA","cargo":"","status":"ativo"},
+      {"nome":"JULIANA MARIA DA CRUZ SIMEAO","cargo":"","status":"ativo"},
+      {"nome":"KENIA MARIA DOS ANJOS","cargo":"","status":"ativo"},
+      {"nome":"LEANDRO LISBOA BARROS ALVES","cargo":"","status":"ativo"},
+      {"nome":"LEILA GOMES DE DEUS","cargo":"","status":"ativo"},
+      {"nome":"LENISE GOMES DE DEUS","cargo":"","status":"ativo"},
+      {"nome":"LUIZ FERNANDO ANTUNES DE SOUZA","cargo":"","status":"ativo"},
+      {"nome":"MARCIO SALES LOURENCO","cargo":"","status":"ativo"},
+      {"nome":"MARIA APARECIDA COELHO","cargo":"","status":"ativo"},
+      {"nome":"MARIA BENILDES FERNANDES MAGAL","cargo":"","status":"ativo"},
+      {"nome":"MARISA APARECIDA FARNEZI DOS S","cargo":"","status":"ativo"},
+      {"nome":"NATALIA FERREIRA DA SILVA","cargo":"","status":"ativo"},
+      {"nome":"NILSON MARIO RAFAEL","cargo":"","status":"ativo"},
+      {"nome":"PAULO ANTONIO DA SILVA MAGALHA","cargo":"","status":"ativo"},
+      {"nome":"RENE DE SANTANA VAZ","cargo":"","status":"ativo"},
+      {"nome":"SHIRLEY APARECIDA ARAUJO SANTO","cargo":"","status":"ativo"},
+      {"nome":"SILVANI GONCALVES PESSOA","cargo":"","status":"ativo"},
+      {"nome":"SONIA ALVES DE OLIVEIRA","cargo":"","status":"ativo"},
+      {"nome":"STHEFANY GOMES MARTINS DA SILV","cargo":"","status":"ativo"},
+      {"nome":"VAGNA APARECIDA DE SOUZA MEDEI","cargo":"","status":"ativo"},
+      {"nome":"VANITA MARIA DE LIMA","cargo":"","status":"ativo"},
+      {"nome":"WALACE FERREIRA RODRIGUES","cargo":"","status":"ativo"},
+      {"nome":"YAGO BRAGA LOUZANIS","cargo":"","status":"ativo"}
+    ];
+    await window.storage.set('efetivo:colaboradores', JSON.stringify(seed), true);
+    return seed;
+  }catch(e){ return []; }
+}
+async function saveColaboradores(list){ try{ await window.storage.set('efetivo:colaboradores',JSON.stringify(list),true); }catch(e){} }
+function turnosEfetivoDia(date){ return activeTurns(date); }
+
+async function renderEfetivo(){
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="loading">Carregando efetivo...</div>';
+  const ds = dateStr(currentDate);
+  const turnosDia = turnosEfetivoDia(currentDate);
+  const [data, colabs] = await Promise.all([loadEfetivo(ds), loadColaboradores()]);
+  if(!data._turnos) data._turnos = turnosDia.map(t=>t.key);
+  const colabsAtivosArr = colabs.filter(p=>(p.status||'ativo')==='ativo').sort((a,b)=>(a.nome||a).localeCompare(b.nome||b));
+  const colabMap = {}; colabs.forEach(p=>{ colabMap[p.nome||p] = p.cargo||''; });
+
+  function nomeOpts(tk){
+    const opts = colabsAtivosArr.map(p=>{ const nome=p.nome||p; const cargo=p.cargo||''; return `<option value="${nome}" data-cargo="${cargo}">${nome}${cargo?' — '+cargo:''}</option>`; }).join('');
+    return `<select id="nsel-${tk}" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;">
+      <option value="">— Selecione colaborador —</option>${opts}<option value="__outro__">✏️ Digitar nome manualmente</option>
+    </select>
+    <input type="text" id="ntxt-${tk}" placeholder="Nome completo" style="display:none;width:100%;margin-top:6px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;">`;
+  }
+
+  function turnoCard(t){
+    const lista=data[t.key]||[]; const label=TURNO_LABELS[t.key]||t.label;
+    const previsto=TURNO_PREVISTO[t.key]||0; const realizado=lista.length;
+    const diff=realizado-previsto; const ader=previsto>0?Math.round(realizado/previsto*100):null;
+    const rows=lista.map((p,i)=>`<tr>
+      <td style="padding:9px 12px;font-size:13px;">${i+1}</td>
+      <td style="padding:9px 12px;font-size:13px;font-weight:500;">${p.nome}</td>
+      <td style="padding:9px 12px;"><span style="font-size:12px;background:var(--panel-2);padding:3px 10px;border-radius:20px;color:var(--teal-bright);">${p.cargo||'—'}</span></td>
+      <td style="padding:9px 12px;text-align:right;">${isAdmin?`<button class="btn small secondary" data-del-t="${t.key}" data-del-i="${i}" style="color:var(--bad);border-color:var(--bad);padding:4px 10px;">✕</button>`:''}</td>
+    </tr>`).join('');
+    return `<div class="card" style="margin-bottom:18px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div><div style="font-size:15px;font-weight:700;">${label}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:2px;">${realizado} colaborador${realizado!==1?'es':''} presente${realizado!==1?'s':''}</div></div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:2px;align-items:center;">
+            <label style="font-size:10px;color:var(--text-dim);">PREVISTO</label>
+            <div style="font-size:16px;font-weight:700;">${previsto}</div>
+          </div>
+          ${ader!==null?`<div style="display:flex;flex-direction:column;gap:2px;align-items:center;">
+            <label style="font-size:10px;color:var(--text-dim);">ADERÊNCIA</label>
+            <div style="font-size:16px;font-weight:700;color:${ader>=90?'var(--ok)':ader>=70?'var(--amber)':'var(--bad)'};">${ader}%</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:2px;align-items:center;">
+            <label style="font-size:10px;color:var(--text-dim);">DIFERENÇA</label>
+            <div style="font-size:16px;font-weight:700;color:${diff>=0?'var(--ok)':'var(--bad)'};">${diff>=0?'+':''}${diff}</div>
+          </div>`:''}
+        </div>
+      </div>
+      ${lista.length?`<div style="overflow-x:auto;margin-bottom:14px;"><table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--line);">
+          <th style="padding:7px 12px;font-size:11px;color:var(--text-dim);text-align:left;">#</th>
+          <th style="padding:7px 12px;font-size:11px;color:var(--text-dim);text-align:left;">Nome</th>
+          <th style="padding:7px 12px;font-size:11px;color:var(--text-dim);text-align:left;">Cargo</th>
+          <th></th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`
+        :`<div class="empty-state" style="margin-bottom:14px;">Nenhum colaborador lançado.</div>`}
+      ${isAdmin?`<div style="border-top:1px solid var(--line);padding-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:2;min-width:180px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Colaborador</label>${nomeOpts(t.key)}</div>
+        <div style="flex:2;min-width:160px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Cargo</label>
+          <select id="csel-${t.key}" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;">
+            <option value="">— Selecione —</option>${CARGOS_EFETIVO.map(cg=>`<option value="${cg}">${cg}</option>`).join('')}
+          </select></div>
+        <button class="btn" data-add-t="${t.key}">+ Adicionar</button>
+      </div>`:''}
+    </div>`;
+  }
+
+  const STATUS_LABEL={ativo:'Ativo',ferias:'Férias',atestado:'Atestado',desligado:'Desligado'};
+  const STATUS_COLOR={ativo:'var(--ok)',ferias:'var(--amber)',atestado:'#a78bfa',desligado:'var(--bad)'};
+  const adminPanel = isAdmin ? (() => {
+    try {
+      return `<div class="card" style="margin-bottom:20px;border:1px solid var(--teal);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div><div style="font-size:15px;font-weight:700;">👷 Efetivo Contratado</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:2px;">Apenas <strong>Ativos</strong> aparecem no lançamento diário.</div></div>
+      <div style="display:flex;gap:8px;font-size:12px;flex-wrap:wrap;">
+        <span style="color:var(--ok);">✅ ${colabs.filter(p=>(p.status||'ativo')==='ativo').length} Ativos</span>
+        <span style="color:var(--amber);">🌴 ${colabs.filter(p=>p.status==='ferias').length} Férias</span>
+        <span style="color:#a78bfa;">🏥 ${colabs.filter(p=>p.status==='atestado').length} Atestado</span>
+        <span style="color:var(--bad);">🚫 ${colabs.filter(p=>p.status==='desligado').length} Desligados</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line);">
+      <div style="flex:3;min-width:180px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">NOME</label>
+        <input type="text" id="novoColab" placeholder="Nome completo" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;"></div>
+      <div style="flex:2;min-width:180px;"><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">CARGO</label>
+        <select id="novoColabCargo" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;">
+          <option value="">— Selecione —</option>${CARGOS_EFETIVO.map(cg=>`<option value="${cg}">${cg}</option>`).join('')}
+        </select></div>
+      <button class="btn" id="btnSaveColab">+ Cadastrar</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      ${['todos','ativo','ferias','atestado','desligado'].map((s,i)=>`<button data-filter-status="${s}" class="btn small ${i===0?'':'secondary'}" style="font-size:12px;">${s==='todos'?'Todos':{'ativo':'✅ Ativo','ferias':'🌴 Férias','atestado':'🏥 Atestado','desligado':'🚫 Desligado'}[s]}</button>`).join('')}
+    </div>
+    ${colabs.length?`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="border-bottom:2px solid var(--line);">
+        <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text-dim);">NOME</th>
+        <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text-dim);">CARGO</th>
+        <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text-dim);">STATUS</th>
+        <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text-dim);">ALTERAR</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${colabs.map((p,i)=>{
+        const nome=p.nome||p; const cargo=p.cargo||'—'; const status=p.status||'ativo';
+        const sc={'ativo':'var(--ok)','ferias':'var(--amber)','atestado':'#a78bfa','desligado':'var(--bad)'}[status]||'var(--ok)';
+        const sl={'ativo':'✅ Ativo','ferias':'🌴 Férias','atestado':'🏥 Atestado','desligado':'🚫 Desligado'}[status]||status;
+        return `<tr style="border-bottom:1px solid var(--line);" data-colab-status="${status}" id="colab-row-${i}">
+          <td style="padding:10px 12px;font-weight:500;">${nome}</td>
+          <td style="padding:10px 12px;"><span style="font-size:12px;background:var(--panel-2);padding:3px 10px;border-radius:20px;color:var(--teal-bright);">${cargo}</span></td>
+          <td style="padding:10px 12px;"><span style="font-size:12px;font-weight:600;color:${sc};">${sl}</span></td>
+          <td style="padding:10px 12px;">
+            <select data-status-colab="${i}" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:5px 10px;border-radius:7px;font-size:12px;font-family:inherit;">
+              <option value="ativo" ${status==='ativo'?'selected':''}>✅ Ativo</option>
+              <option value="ferias" ${status==='ferias'?'selected':''}>🌴 Férias</option>
+              <option value="atestado" ${status==='atestado'?'selected':''}>🏥 Atestado</option>
+              <option value="desligado" ${status==='desligado'?'selected':''}>🚫 Desligado</option>
+            </select>
+          </td>
+          <td style="padding:10px 12px;text-align:right;white-space:nowrap;">
+            <button data-editcolab="${i}" style="background:none;border:none;color:var(--teal-bright);cursor:pointer;font-size:15px;padding:0 6px 0 0;">✏️</button>
+            <button data-rmcolab="${i}" style="background:none;border:none;color:var(--bad);cursor:pointer;font-size:15px;padding:0;">🗑</button>
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`:'<div class="empty-state">Nenhum colaborador cadastrado ainda.</div>'}
+  </div>`;
+    } catch(e){ return '<div class="empty-state">Erro ao carregar efetivo contratado.</div>'; }
+  })() : '<div class="empty-state" style="margin-top:40px;">⛔ Acesso restrito ao administrador.</div>';
+
+  async function buildHistorico(){
+    const days=Array.from({length:14},(_,i)=>{ const d=new Date(currentDate); d.setDate(d.getDate()-(13-i)); return d; });
+    const results=await Promise.all(days.map(d=>loadEfetivo(dateStr(d))));
+    const rows=[];
+    for(let i=0;i<14;i++){
+      const d=days[i]; const ddata=results[i];
+      const turnos=ddata._turnos||activeTurns(d).map(t=>t.key);
+      for(const tk of turnos){
+        const lista=ddata[tk]||[]; const previsto=TURNO_PREVISTO[tk]||0; const realizado=lista.length;
+        if(previsto===0&&realizado===0) continue;
+        const diff=realizado-previsto; const ader=previsto>0?(realizado/previsto*100).toFixed(1)+'%':'—';
+        rows.push(`<tr><td style="padding:9px 12px;white-space:nowrap;">${fmtBR(d)}</td>
+          <td style="padding:9px 12px;">${TURNO_LABELS[tk]||tk}</td>
+          <td style="padding:9px 12px;text-align:center;font-weight:600;">${previsto||'—'}</td>
+          <td style="padding:9px 12px;text-align:center;font-weight:600;">${realizado}</td>
+          <td style="padding:9px 12px;text-align:center;font-weight:600;color:${diff>=0?'var(--ok)':'var(--bad)'};">${diff>=0?'+':''}${diff}</td>
+          <td style="padding:9px 12px;text-align:center;font-weight:600;">${ader}</td></tr>`);
+      }
+    }
+    return rows.length?`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="border-bottom:2px solid var(--line);">
+        <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text-dim);">DATA</th>
+        <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text-dim);">PLANTÃO</th>
+        <th style="padding:9px 12px;text-align:center;font-size:11px;color:var(--text-dim);">PREVISTO</th>
+        <th style="padding:9px 12px;text-align:center;font-size:11px;color:var(--text-dim);">REALIZADO</th>
+        <th style="padding:9px 12px;text-align:center;font-size:11px;color:var(--text-dim);">DIFERENÇA</th>
+        <th style="padding:9px 12px;text-align:center;font-size:11px;color:var(--text-dim);">ADERÊNCIA</th>
+      </tr></thead><tbody>${rows.join('')}</tbody></table></div>`
+      :'<div class="empty-state">Nenhum lançamento nos últimos 14 dias.</div>';
+  }
+
+  async function buildConsolidado(ano,mes){
+    const diasNoMes=new Date(ano,mes,0).getDate();
+    const days=Array.from({length:diasNoMes},(_,i)=>new Date(ano,mes-1,i+1));
+    const results=await Promise.all(days.map(d=>loadEfetivo(dateStr(d))));
+    let totalPrev=0,totalReal=0;
+    for(let i=0;i<diasNoMes;i++){
+      const ddata=results[i]; const turnos=ddata._turnos||activeTurns(days[i]).map(t=>t.key);
+      for(const tk of turnos){ totalPrev+=TURNO_PREVISTO[tk]||0; totalReal+=(ddata[tk]||[]).length; }
+    }
+    const deficit=totalReal-totalPrev; const ader=totalPrev>0?(totalReal/totalPrev*100).toFixed(1):null;
+    return {totalPrev,totalReal,deficit,ader};
+  }
+
+  const meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const anoAtual=currentDate.getFullYear(), mesAtual=currentDate.getMonth()+1;
+  const mesOpts=Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===mesAtual?'selected':''}>${meses[i]}</option>`).join('');
+  const anoOpts=[anoAtual-1,anoAtual,anoAtual+1].map(a=>`<option value="${a}" ${a===anoAtual?'selected':''}>${a}</option>`).join('');
+  const hist='<div class="loading" id="histLoading">Carregando histórico...</div>';
+  const consolPlaceholder='<div style="font-size:13px;color:var(--text-dim);padding:12px 0;">Selecione o período e clique em Calcular.</div>';
+
+  app.innerHTML=`<div style="max-width:900px;">
+    <div style="display:flex;gap:10px;margin-bottom:24px;border-bottom:1px solid var(--line);">
+      <button id="efTab-dia" style="padding:10px 20px;background:none;border:none;border-bottom:2px solid var(--teal-bright);color:var(--teal-bright);font-weight:600;font-size:14px;cursor:pointer;">📅 Lançamento Diário</button>
+      <button id="efTab-contratado" style="padding:10px 20px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:14px;cursor:pointer;">👷 Efetivo Contratado</button>
+    </div>
+    <div id="efPanel-dia">
+      <div style="margin-bottom:20px;">
+        <div style="font-size:18px;font-weight:700;">📅 Efetivo do Dia</div>
+        <div style="font-size:13px;color:var(--text-dim);margin-top:2px;">${['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'][currentDate.getDay()]+', '+fmtBR(currentDate)} — Plantões ativos: <span style="color:var(--teal-bright);">${turnosDia.map(t=>TURNO_LABELS[t.key]).join(' · ')}</span></div>
+      </div>
+      ${turnosDia.map(turnoCard).join('')}
+      <div class="section-title" style="margin-top:8px;">Histórico — últimos 14 dias</div>
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:24px;" id="histCard">${hist}</div>
+      <div class="section-title">Consolidado do mês</div>
+      <div class="card">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
+          <div><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">MÊS</label>
+            <select id="consolMes" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:7px 12px;border-radius:8px;font-size:13px;font-family:inherit;">${mesOpts}</select></div>
+          <div><label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">ANO</label>
+            <select id="consolAno" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:7px 12px;border-radius:8px;font-size:13px;font-family:inherit;">${anoOpts}</select></div>
+          <button class="btn secondary" id="btnConsol">Calcular</button>
+        </div>
+        <div id="consolResult">${consolPlaceholder}</div>
+      </div>
+    </div>
+    <div id="efPanel-contratado" style="display:none;">${isAdmin ? adminPanel : '<div class="empty-state" style="margin-top:40px;">⛔ Acesso restrito ao administrador.</div>'}</div>
+  </div>`;
+
+  function switchEfTab(tab){
+    efAbaAtiva=tab;
+    const dia=document.getElementById('efPanel-dia'), cont=document.getElementById('efPanel-contratado');
+    const tDia=document.getElementById('efTab-dia'), tCont=document.getElementById('efTab-contratado');
+    if(!dia||!cont||!tDia||!tCont) return;
+    if(tab==='dia'){ dia.style.display=''; cont.style.display='none'; tDia.style.cssText='padding:10px 20px;background:none;border:none;border-bottom:2px solid var(--teal-bright);color:var(--teal-bright);font-weight:600;font-size:14px;cursor:pointer;'; tCont.style.cssText='padding:10px 20px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:14px;cursor:pointer;'; }
+    else { dia.style.display='none'; cont.style.display=''; tCont.style.cssText='padding:10px 20px;background:none;border:none;border-bottom:2px solid var(--teal-bright);color:var(--teal-bright);font-weight:600;font-size:14px;cursor:pointer;'; tDia.style.cssText='padding:10px 20px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:14px;cursor:pointer;'; }
+  }
+  document.getElementById('efTab-dia')?.addEventListener('click',()=>switchEfTab('dia'));
+  document.getElementById('efTab-contratado')?.addEventListener('click',()=>switchEfTab('contratado'));
+  if(efAbaAtiva==='contratado') switchEfTab('contratado');
+
+  setTimeout(async()=>{ const hc=document.getElementById('histCard'); if(hc){ hc.innerHTML=await buildHistorico(); } },0);
+
+  turnosDia.forEach(t=>{
+    const sel=document.getElementById('nsel-'+t.key), txt=document.getElementById('ntxt-'+t.key), csel=document.getElementById('csel-'+t.key);
+    if(!sel||!txt) return;
+    sel.addEventListener('change',()=>{ txt.style.display=sel.value==='__outro__'?'block':'none'; if(sel.value==='__outro__'){ txt.focus(); if(csel) csel.value=''; return; } if(csel&&sel.value&&colabMap[sel.value]) csel.value=colabMap[sel.value]; });
+  });
+
+  app.querySelectorAll('[data-add-t]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const tk=btn.getAttribute('data-add-t');
+      const sel=document.getElementById('nsel-'+tk), txt=document.getElementById('ntxt-'+tk), csel=document.getElementById('csel-'+tk);
+      let nome=sel.value==='__outro__'?txt.value.trim():sel.value; let cargo=csel.value;
+      if(!cargo&&sel.value!=='__outro__'&&colabMap[nome]) cargo=colabMap[nome];
+      if(!nome){(sel.value==='__outro__'?txt:sel).focus();return;} if(!cargo){csel.focus();return;}
+      if(!data[tk])data[tk]=[];
+      if(data[tk].find(p=>p.nome===nome)){alert('"'+nome+'" já lançado neste turno.');return;}
+      data[tk].push({nome,cargo,ts:Date.now(),by:currentUser?.nome||currentEmployee||''});
+      data._turnos=turnosDia.map(x=>x.key);
+      await saveEfetivo(ds,data); renderEfetivo();
+    });
+  });
+
+  app.querySelectorAll('[data-del-t]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const tk=btn.getAttribute('data-del-t'), idx=parseInt(btn.getAttribute('data-del-i'));
+      if(!confirm('Remover?'))return; data[tk].splice(idx,1); await saveEfetivo(ds,data); renderEfetivo();
+    });
+  });
+
+  document.getElementById('btnSaveColab')?.addEventListener('click',async()=>{
+    const nome=document.getElementById('novoColab').value.trim(), cargo=document.getElementById('novoColabCargo').value;
+    if(!nome) return; if(!cargo){document.getElementById('novoColabCargo').focus();return;}
+    if(colabs.find(p=>(p.nome||p)===nome)){alert('Já cadastrado.');return;}
+    colabs.push({nome,cargo,status:'ativo'}); colabs.sort((a,b)=>(a.nome||a).localeCompare(b.nome||b));
+    await saveColaboradores(colabs); document.getElementById('novoColab').value=''; document.getElementById('novoColabCargo').value='';
+    renderEfetivo('contratado');
+  });
+
+  app.querySelectorAll('[data-filter-status]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const filter=btn.getAttribute('data-filter-status');
+      app.querySelectorAll('[data-filter-status]').forEach(b=>b.classList.add('secondary')); btn.classList.remove('secondary');
+      app.querySelectorAll('tr[data-colab-status]').forEach(row=>{ row.style.display=(filter==='todos'||row.getAttribute('data-colab-status')===filter)?'':'none'; });
+    });
+  });
+
+  app.querySelectorAll('[data-status-colab]').forEach(sel=>{
+    sel.addEventListener('change',async()=>{
+      const i=parseInt(sel.getAttribute('data-status-colab')); colabs[i].status=sel.value;
+      await saveColaboradores(colabs); renderEfetivo('contratado');
+    });
+  });
+
+  app.querySelectorAll('[data-editcolab]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const i=parseInt(btn.getAttribute('data-editcolab')); const p=colabs[i];
+      const nome=p.nome||p; const cargo=p.cargo||''; const status=p.status||'ativo';
+      const row=document.getElementById('colab-row-'+i); if(!row) return;
+      row.innerHTML=`<td style="padding:8px 10px;" colspan="2">
+        <input id="edit-nome-${i}" value="${nome}" style="width:100%;background:var(--panel-2);border:1px solid var(--teal);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;font-family:inherit;margin-bottom:6px;">
+        <select id="edit-cargo-${i}" style="width:100%;background:var(--panel-2);border:1px solid var(--teal);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+          ${CARGOS_EFETIVO.map(cg=>`<option value="${cg}" ${cg===cargo?'selected':''}>${cg}</option>`).join('')}
+        </select></td>
+        <td style="padding:8px 10px;" colspan="2"><select id="edit-status-${i}" style="width:100%;background:var(--panel-2);border:1px solid var(--teal);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+          <option value="ativo" ${status==='ativo'?'selected':''}>✅ Ativo</option>
+          <option value="ferias" ${status==='ferias'?'selected':''}>🌴 Férias</option>
+          <option value="atestado" ${status==='atestado'?'selected':''}>🏥 Atestado</option>
+          <option value="desligado" ${status==='desligado'?'selected':''}>🚫 Desligado</option>
+        </select></td>
+        <td style="padding:8px 10px;text-align:right;white-space:nowrap;">
+          <button id="edit-save-${i}" class="btn small" style="margin-right:6px;">✅ Salvar</button>
+          <button id="edit-cancel-${i}" class="btn small secondary">✕</button>
+        </td>`;
+      document.getElementById('edit-save-'+i)?.addEventListener('click',async()=>{
+        const nn=document.getElementById('edit-nome-'+i).value.trim(), nc=document.getElementById('edit-cargo-'+i).value, ns=document.getElementById('edit-status-'+i).value;
+        if(!nn) return; colabs[i]={nome:nn,cargo:nc,status:ns}; await saveColaboradores(colabs); renderEfetivo('contratado');
+      });
+      document.getElementById('edit-cancel-'+i)?.addEventListener('click',()=>renderEfetivo('contratado'));
+    });
+  });
+
+  app.querySelectorAll('[data-rmcolab]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const i=parseInt(btn.getAttribute('data-rmcolab'));
+      if(!confirm('Remover "'+colabs[i].nome+'"?'))return;
+      colabs.splice(i,1); await saveColaboradores(colabs); renderEfetivo('contratado');
+    });
+  });
+
+  document.getElementById('btnConsol')?.addEventListener('click',async()=>{
+    const m=parseInt(document.getElementById('consolMes').value), a=parseInt(document.getElementById('consolAno').value);
+    const res=await buildConsolidado(a,m);
+    document.getElementById('consolResult').innerHTML=`<div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="stat-box"><div class="num">${res.totalPrev||'—'}</div><div class="lbl">Previsto no mês</div></div>
+      <div class="stat-box"><div class="num" style="color:var(--ok);">${res.totalReal}</div><div class="lbl">Realizado no mês</div></div>
+      <div class="stat-box"><div class="num" style="color:${res.deficit>=0?'var(--ok)':'var(--bad)'};">${res.deficit>=0?'+':''}${res.deficit}</div><div class="lbl">Déficit acumulado</div></div>
+      <div class="stat-box"><div class="num" style="color:${res.ader>=90?'var(--ok)':res.ader>=70?'var(--amber)':'var(--bad)'};">${res.ader?res.ader+'%':'—'}</div><div class="lbl">Aderência mensal</div></div>
+    </div>`;
+  });
+}
+
+// Wire navEfetivo
+document.getElementById('navEfetivo').addEventListener('click',()=>{
+  section='efetivo';
+  document.querySelectorAll('.mainnav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('navEfetivo').classList.add('active');
+  renderTopControls();
+  renderEfetivo();
+});
+
 </script>
 </body>
 </html>
