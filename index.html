@@ -2593,7 +2593,7 @@ function showQRModal(){
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.style.display='none'; });
   // Generate QR using free API
   const qrImg = document.createElement('img');
-  qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data='+encodeURIComponent('https://log-meli-betim.github.io/sistema-limpeza');
+  qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data='+encodeURIComponent('https://meli-betim.github.io/sistema-limpeza?tab=requests');
   qrImg.style.cssText = 'width:180px;height:180px;border-radius:4px;';
   qrImg.alt = 'QR Code';
   document.getElementById('qrCodeContainer').appendChild(qrImg);
