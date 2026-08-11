@@ -93,7 +93,7 @@ const fbRequestsRef = fbRoot.child('requests');
 
 // Chaves que ficam salvas apenas no navegador local (preferência por dispositivo),
 // em vez de sincronizadas entre todos os usuários.
-const LOCAL_ONLY_KEYS = new Set(['currentEmployee']);
+const LOCAL_ONLY_KEYS = new Set(['currentEmployee', 'userSession', 'adminSession']);
 
 // Wrapper com timeout para evitar travamento em chamadas Firebase
 function withTimeout(promise, ms=8000){
@@ -2947,7 +2947,7 @@ async function ensureUserLogin(){
     const sess = await window.storage.get('userSession', false);
     if(sess){
       const u = JSON.parse(sess.value);
-      if(u.ts && (Date.now()-u.ts) < 12*60*60*1000){
+      if(u.ts && (Date.now()-u.ts) < 8*60*60*1000){  // sessão válida por 8h (1 turno)
         const found = users.find(x=>x.nome===u.nome && x.pin===u.pin);
         if(found){
           currentUser=found; currentEmployee=found.nome;
