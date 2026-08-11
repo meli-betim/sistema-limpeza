@@ -54,6 +54,7 @@
   <button id="navRequests">Solicitações</button>
   <button id="navReport">Relatório</button>
   <button id="navEfetivo">👷 Efetivo</button>
+  <button id="nav52" style="background:transparent;border:1px solid rgba(227,179,65,.35);color:#e3b341;font-size:12.5px;padding:5px 12px;border-radius:20px;margin:auto 0 auto 4px;">📅 Plano 52 Sem.</button>
   <button id="navUsers" style="display:none;">👥 Usuários</button>
         <button id="navAdmin">🔑 Admin</button>
 </div>
@@ -62,6 +63,7 @@
   <div class="loading">Carregando...</div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script>
@@ -559,10 +561,10 @@ function getEntry(data,k){
 function renderTopControls(){
   const tc = document.getElementById('topControls');
   // Mark correct nav button active
-  ['navChecklist','navRequests','navReport','navUsers','navEfetivo'].forEach(id=>{
+  ['navChecklist','navRequests','navReport','navUsers','navEfetivo','nav52'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.classList.remove('active');
   });
-  const activeNav={checklist:'navChecklist',requests:'navRequests',report:'navReport',users:'navUsers',efetivo:'navEfetivo'}[section];
+  const activeNav={checklist:'navChecklist',requests:'navRequests',report:'navReport',users:'navUsers',efetivo:'navEfetivo',p52sem:'nav52'}[section];
   if(activeNav && document.getElementById(activeNav)) document.getElementById(activeNav).classList.add('active');
   updateNavAdminVisibility();
 
@@ -968,17 +970,203 @@ async function renderDay(){
       const next = cycleState(cur);
       if(next==='pending'){
         delete data[k];
+        await saveDay(ds);
+        renderDay();
       } else {
-        const name = prompt('Quem realizou esta limpeza?', currentEmployee || '');
-        if(!name || !name.trim()){ return; }
-        const empName = name.trim();
-        await saveEmployee(empName);
-        data[k] = {state:next, ts:Date.now(), emp:empName};
+        // Extrai turnKey da chave (formato: locName|turnKey|idx)
+        const kParts = k.split('|');
+        const occTurnKey = kParts[1] || '';
+        await showColabPicker(occTurnKey, async (empName) => {
+          await saveEmployee(empName);
+          data[k] = {state:next, ts:Date.now(), emp:empName};
+          await saveDay(ds);
+          renderDay();
+        });
       }
-      await saveDay(ds);
-      renderDay();
     });
   });
+}
+
+
+// ════════════════════════════════════════════════════════
+// PICKER DE COLABORADORES DO TURNO
+// Substitui o prompt() ao marcar execuções no checklist
+// ════════════════════════════════════════════════════════
+async function showColabPicker(turnKey, onConfirm) {
+  // Carrega efetivo do dia atual e cadastro geral
+  const ds = dateStr(currentDate);
+  const [efetivoDia, colabsCadastrados] = await Promise.all([
+    loadEfetivo(ds),
+    loadColaboradores()
+  ]);
+
+  // Colaboradores lançados no turno ativo hoje
+  const noTurno = (efetivoDia[turnKey] || []).map(p => p.nome || p);
+
+  // Todos os ativos do cadastro como fallback
+  const todosAtivos = colabsCadastrados
+    .filter(p => (p.status || 'ativo') === 'ativo')
+    .map(p => p.nome || p)
+    .sort((a, b) => a.localeCompare(b));
+
+  // Remove duplicatas — prioriza os do turno
+  const outrosCadastrados = todosAtivos.filter(n => !noTurno.includes(n));
+
+  // Monta o overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'colabPickerOverlay';
+  overlay.style.cssText = [
+    'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9990;',
+    'display:flex;align-items:center;justify-content:center;padding:16px;'
+  ].join('');
+
+  const turnLabel = {T1D:'T1 Par (Diurno)',T2D:'T1 Ímpar (Diurno)',T1N:'T2 Par (Noturno)',T2N:'T2 Ímpar (Noturno)'}[turnKey] || turnKey;
+
+  const noTurnoHtml = noTurno.length
+    ? noTurno.map(n => `<button class="cpick-btn cpick-turno" data-nome="${n}">${n}</button>`).join('')
+    : '<div style="font-size:13px;color:var(--text-dim);padding:8px 0;">Nenhum colaborador lançado neste turno hoje.<br>Use a aba <strong>👷 Efetivo</strong> para lançar o efetivo do dia.</div>';
+
+  const outrosHtml = outrosCadastrados.length
+    ? outrosCadastrados.map(n => `<button class="cpick-btn cpick-outro" data-nome="${n}">${n}</button>`).join('')
+    : '';
+
+  overlay.innerHTML = `
+<style>
+#colabPickerBox{background:var(--panel);border:1px solid var(--teal);border-radius:16px;width:100%;max-width:420px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6);}
+#colabPickerBox .cpick-header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;}
+#colabPickerBox .cpick-header h3{margin:0;font-size:15px;font-weight:700;}
+#colabPickerBox .cpick-header .cpick-sub{font-size:12px;color:var(--text-dim);margin-top:2px;}
+#colabPickerBox .cpick-body{overflow-y:auto;padding:16px 20px;flex:1;}
+#colabPickerBox .cpick-section{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:14px;}
+#colabPickerBox .cpick-section:first-child{margin-top:0;}
+#colabPickerBox .cpick-btns{display:flex;flex-direction:column;gap:6px;}
+.cpick-btn{width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:13px 16px;border-radius:9px;font-size:14px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,border-color .15s;}
+.cpick-btn:active{transform:scale(.98);}
+.cpick-turno{border-color:rgba(63,214,201,.35);background:rgba(63,214,201,.07);}
+.cpick-turno:hover{background:rgba(63,214,201,.15);border-color:var(--teal-bright);}
+.cpick-outro{opacity:.8;}
+.cpick-outro:hover{background:var(--line);opacity:1;}
+#colabPickerBox .cpick-footer{padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:8px;}
+#colabPickerBox .cpick-footer button{flex:1;padding:11px;border-radius:8px;font-weight:700;font-size:13px;}
+</style>
+<div id="colabPickerBox">
+  <div class="cpick-header">
+    <div>
+      <h3>👤 Quem realizou?</h3>
+      <div class="cpick-sub">${turnLabel}</div>
+    </div>
+    <button onclick="document.getElementById('colabPickerOverlay').remove()" style="background:transparent;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;">✕</button>
+  </div>
+  <div class="cpick-body">
+    <div class="cpick-section">No turno hoje</div>
+    <div class="cpick-btns">${noTurnoHtml}</div>
+    ${outrosHtml ? `<div class="cpick-section" style="margin-top:16px;">Outros colaboradores</div><div class="cpick-btns">${outrosHtml}</div>` : ''}
+  </div>
+  <div class="cpick-footer">
+    <button class="btn secondary" onclick="document.getElementById('colabPickerOverlay').remove()">Cancelar</button>
+  </div>
+</div>`;
+
+  document.body.appendChild(overlay);
+
+  // Clique em qualquer colaborador
+  overlay.querySelectorAll('.cpick-btn[data-nome]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nome = btn.getAttribute('data-nome');
+      document.getElementById('colabPickerOverlay').remove();
+      onConfirm(nome);
+    });
+  });
+
+  // Fechar clicando fora do box
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.remove();
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// RELATÓRIO: INDICADOR COLABORADORES × ÁREAS ATENDIDAS
+// ════════════════════════════════════════════════════════
+async function renderReportColabs(dates, dataByDate) {
+  // Monta mapa: colaborador → Set de locais atendidos
+  const colabMap = {}; // {nome: {locais: Set, execucoes: N, turnos: Set}}
+
+  for (const d of dates) {
+    const ds = dateStr(d);
+    const dayData = dataByDate[ds];
+    if (!dayData) continue;
+
+    LOCATIONS.forEach(loc => {
+      TURNS.forEach(t => {
+        const n = resolveFreq(loc, t.key, d);
+        for (let i = 0; i < n; i++) {
+          const k = loc.name + '|' + t.key + '|' + i;
+          const entry = getEntry(dayData, k);
+          if (entry.state === 'done' && entry.emp) {
+            const nome = entry.emp.trim();
+            if (!nome) continue;
+            if (!colabMap[nome]) colabMap[nome] = { locais: new Set(), execucoes: 0, turnos: new Set(), dias: new Set() };
+            colabMap[nome].locais.add(loc.name);
+            colabMap[nome].execucoes++;
+            colabMap[nome].turnos.add(t.key);
+            colabMap[nome].dias.add(ds);
+          }
+        }
+      });
+    });
+  }
+
+  if (!Object.keys(colabMap).length) return '';
+
+  // Ordena por execuções DESC
+  const sorted = Object.entries(colabMap).sort((a, b) => b[1].execucoes - a[1].execucoes);
+  const maxExec = sorted[0]?.[1].execucoes || 1;
+
+  const TURN_LABEL = {T1D:'T1 Par',T2D:'T1 Ímpar',T1N:'T2 Par',T2N:'T2 Ímpar'};
+
+  const rows = sorted.map(([nome, info]) => {
+    const pct = Math.round(info.execucoes / maxExec * 100);
+    const barColor = pct >= 80 ? 'var(--ok)' : pct >= 50 ? 'var(--teal-bright)' : 'var(--amber)';
+    const turnos = [...info.turnos].map(t => TURN_LABEL[t] || t).join(', ');
+    const iniciais = nome.split(' ').map(p=>p[0]).join('').toUpperCase().substring(0,2);
+    return `<tr>
+      <td style="padding:10px 12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--teal);color:#06211f;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">${iniciais}</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;">${nome}</div>
+            <div style="font-size:11px;color:var(--text-dim);">${turnos}</div>
+          </div>
+        </div>
+      </td>
+      <td style="padding:10px 12px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;height:6px;background:var(--panel-2);border-radius:3px;min-width:60px;overflow:hidden;">
+            <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px;transition:width .3s;"></div>
+          </div>
+          <span style="font-size:13px;font-weight:700;color:${barColor};min-width:28px;text-align:right;">${info.locais.size}</span>
+        </div>
+      </td>
+      <td class="num" style="font-weight:700;color:var(--teal-bright);">${info.execucoes}</td>
+      <td class="num">${info.dias.size}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+<div class="section-title" style="margin-top:28px;">👤 Desempenho por colaborador</div>
+<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:20px;">
+  <table class="report-table" style="margin:0;">
+    <thead>
+      <tr>
+        <th>Colaborador</th>
+        <th>Áreas atendidas <span style="font-weight:400;font-size:11px;opacity:.7;">(únicas no período)</span></th>
+        <th class="num">Execuções</th>
+        <th class="num">Dias ativos</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>`;
 }
 
 async function renderWeek(){
@@ -2115,6 +2303,14 @@ async function renderReportChecklist(){
       <div style="font-size:12px;color:var(--text-dim);margin-top:8px;">${rows.length} registro(s) encontrado(s)</div>`;
   }
 
+  // Indicador: colaboradores × áreas atendidas (acrescentado ao final do relatório)
+  const colabHtml = await renderReportColabs(dates, dataByDate);
+  if (colabHtml) {
+    const colabDiv = document.createElement('div');
+    colabDiv.innerHTML = colabHtml;
+    content.appendChild(colabDiv);
+  }
+
   // Renderiza tabela inicial com todos os registros
   let currentRows = buildDetailRows('','','','');
   renderDetailTable(currentRows);
@@ -3117,29 +3313,49 @@ function kSwitchTab(tab){
           if(!nome){ result.innerHTML='<div style="color:var(--bad);font-size:13px;">Informe seu nome.</div>'; return; }
           mineBtn.disabled=true; mineBtn.textContent='Buscando...';
           await ensureRequestsLoaded();
-          const found = _requests.filter(r=> r.nome && r.nome.toLowerCase().includes(nome) && r.status!=='concluida')
-                                  .sort((a,b)=>b.createdAt-a.createdAt);
+          // Busca TODAS as solicitações — incluindo concluídas
+          const all = _requests.filter(r=> r.nome && r.nome.toLowerCase().includes(nome))
+                                .sort((a,b)=>b.createdAt-a.createdAt);
           mineBtn.disabled=false; mineBtn.textContent='Buscar minhas solicitações';
-          if(!found.length){
-            result.innerHTML='<div style="font-size:13px;color:var(--text-dim);text-align:center;padding:20px 0;">Nenhuma solicitação aberta encontrada para "<strong>'+nome+'</strong>".</div>';
+          if(!all.length){
+            result.innerHTML='<div style="font-size:13px;color:var(--text-dim);text-align:center;padding:20px 0;">Nenhuma solicitação encontrada para "<strong>'+nome+'</strong>".</div>';
             return;
           }
-          const statusMap={aberta:{label:'⏳ Pendente',color:'var(--amber)'},andamento:{label:'🔧 Em andamento',color:'var(--teal-bright)'},concluida:{label:'✅ Concluída',color:'var(--ok)'}};
-          result.innerHTML = '<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">'+found.length+' solicitação(ões) encontrada(s):</div>' +
-            found.map(r=>{
-              const s=statusMap[r.status]||{label:r.status,color:'var(--text)'};
-              const assigneeHtml = r.assignee ? '<div style="font-size:12px;color:var(--text-dim);margin-top:3px;">👤 Responsável: '+r.assignee+'</div>' : '';
-              return '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px;">'+
-                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
-                  '<span style="font-size:11px;color:var(--text-dim);">#'+r.id+'</span>'+
-                  '<span style="font-size:12px;font-weight:700;color:'+s.color+';">'+s.label+'</span>'+
-                '</div>'+
-                '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">'+r.local+'</div>'+
-                '<div style="font-size:12px;color:var(--text-dim);">'+r.desc+'</div>'+
-                assigneeHtml+
-                '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Aberta em: '+fmtBRTime(new Date(r.createdAt))+'</div>'+
-              '</div>';
-            }).join('');
+          const statusMap={aberta:{label:'⏳ Pendente',color:'var(--amber)'},andamento:{label:'🔄 Em andamento',color:'#2563eb'},concluida:{label:'✅ Concluída',color:'var(--ok)'}};
+
+          function cardHtml(r){
+            const s=statusMap[r.status]||{label:r.status,color:'var(--text)'};
+            return '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px;">'+
+              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
+                '<span style="font-size:11px;color:var(--text-dim);">#'+r.id+'</span>'+
+                '<span style="font-size:12px;font-weight:700;color:'+s.color+';">'+s.label+'</span>'+
+              '</div>'+
+              '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px;">'+r.local+'</div>'+
+              '<div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">'+r.tipo+'</div>'+
+              (r.desc?'<div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">'+r.desc+'</div>':'')+
+              '<div style="font-size:11px;color:var(--text-dim);">Aberta em: '+fmtBRTime(new Date(r.createdAt))+'</div>'+
+              (r.assignee?'<div style="font-size:12px;color:var(--text-dim);margin-top:3px;">👤 Responsável: '+r.assignee+'</div>':'')+
+              (r.status==='concluida'&&r.resolvedAt?'<div style="font-size:12px;color:var(--ok);margin-top:3px;">✅ Concluída em: '+fmtBRTime(new Date(r.resolvedAt))+'</div>':'')+
+            '</div>';
+          }
+
+          let activeFilter='todas';
+          function renderFull(){
+            const ct={todas:all.length,aberta:all.filter(r=>r.status==='aberta').length,andamento:all.filter(r=>r.status==='andamento').length,concluida:all.filter(r=>r.status==='concluida').length};
+            const filtered=activeFilter==='todas'?all:all.filter(r=>r.status===activeFilter);
+            result.innerHTML=
+              '<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">'+all.length+' solicitação(ões) no histórico</div>'+
+              '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">'+
+                [['todas','Todas'],['aberta','⏳ Pendentes'],['andamento','🔄 Em andamento'],['concluida','✅ Concluídas']].map(([v,l])=>
+                  '<button data-f="'+v+'" style="padding:7px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:'+(activeFilter===v?'var(--teal)':'var(--panel)')+';color:'+(activeFilter===v?'#06211f':'var(--text-dim)')+';">'+l+' ('+ct[v]+')</button>'
+                ).join('')+
+              '</div>'+
+              (filtered.length?filtered.map(cardHtml).join(''):'<div style="font-size:13px;color:var(--text-dim);text-align:center;padding:20px 0;">Nenhuma solicitação neste filtro.</div>');
+            result.querySelectorAll('[data-f]').forEach(btn=>{
+              btn.addEventListener('click',()=>{ activeFilter=btn.getAttribute('data-f'); renderFull(); });
+            });
+          }
+          renderFull();
         });
       }
     }, 100);
@@ -3596,6 +3812,1115 @@ document.getElementById('navEfetivo').addEventListener('click',()=>{
   renderTopControls();
   renderEfetivo();
 });
+
+
+// ============================================================
+// MÓDULO PLANO 52 SEMANAS
+// Inserido como adição ao sistema existente — não altera nada
+// ============================================================
+
+// ── CONSTANTES ──────────────────────────────────────────────
+
+const P52_ALIAS = {
+  // Excel → sistema (Plano de Limpeza)
+  'Auditório':                          'Sala de Treinamento',
+  'Melihelp':                           'Meli Help',
+  'Refeitório':                         'Meli Café',
+  'DML':                                'DMLs',
+  'Doca':                               'Docas Inbound',
+  'Ilha de ICQA':                       'ICQA',
+  'Descompressão':                      'Área de Descompressão',
+  'Fundos Staff':                       'Setor ADM',
+  'Sala IS':                            'Sala TI',
+  'Vestiário':                          'Vestiário Masculino',
+  'Banheiros Inbound':                  'Banheiro Esfera 1 (Inbound) — Masculino',
+  'Banheiro Novo Outbound':             'Banheiro Novo Outbound',
+  'Sala Principal Staff':               'Sala Staff',
+  'Salas de Reunião':                   'Sala de Reunião',
+  'Recepção e Banheiro Recepção':       'Portaria',
+  'Ilha de Outbound':                   'Docas Outbound',
+  'Ilha de Inbound':                    'Docas Inbound',
+  'Buffers':                            null, // REMOVIDO — ignorar
+};
+
+// Áreas criadas diretamente no sistema (não existem no Excel)
+const P52_AREAS_EXTRA = [
+  {
+    nome: 'Sorter',
+    tipo: 'operacional',
+    atividades: [
+      {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+      {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+    ]
+  },
+  {
+    nome: 'Mezanino',
+    tipo: 'operacional',
+    atividades: [
+      {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+      {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+    ]
+  },
+  {
+    nome: 'HS',
+    tipo: 'operacional',
+    atividades: [
+      {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+      {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+    ]
+  },
+  {
+    nome: 'HV',
+    tipo: 'operacional',
+    atividades: [
+      {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+      {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+      {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+    ]
+  },
+];
+
+// ── FIREBASE PATHS ────────────────────────────────────────────
+// fbRoot já existe: firebase.database().ref('sistema_limpeza')
+// Usaremos:  sistema_limpeza/plano52/atividades
+//            sistema_limpeza/plano52/status/{YYYY-MM-DD}/{atv_id}
+//            sistema_limpeza/plano52/aliases
+//            sistema_limpeza/plano52/areas_extra
+//            sistema_limpeza/plano52/meta  (data import, versão)
+
+const fb52 = () => fbRoot.child('plano52');
+
+// ── ESTADO LOCAL ──────────────────────────────────────────────
+let p52Atividades = [];   // [{id, area, atividade, freq, turno, fonte}]
+let p52StatusCache = {};  // {YYYY-MM-DD: {atv_id: {status,resp,ts,manual}}}
+let p52Meta = null;       // {importedAt, version, totalAtv}
+let p52View = 'semana';   // 'semana' | 'mes' | 'ano'
+let p52WeekOffset = 0;
+let p52MonthOffset = 0;
+let p52Filters = {area:'', turno:'', status:'', freq:''};
+let p52FirebaseListener = null;
+
+// ── HELPERS ──────────────────────────────────────────────────
+
+function p52Today(){ return nowBRT(); }
+function p52DateStr(d){ return dateStr(d); }
+
+function p52GetWeekDates(offset){
+  const today = p52Today();
+  // Início da semana = segunda-feira
+  const dow = today.getDay(); // 0=dom
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow===0 ? 6 : dow-1) + offset*7);
+  monday.setHours(0,0,0,0);
+  const days = [];
+  for(let i=0;i<7;i++){
+    const d = new Date(monday);
+    d.setDate(monday.getDate()+i);
+    days.push(d);
+  }
+  return days;
+}
+
+function p52WeekNum(d){
+  const jan1 = new Date(d.getFullYear(),0,1);
+  return Math.ceil(((d-jan1)/86400000 + jan1.getDay()+1)/7);
+}
+
+const P52_MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const P52_DIAS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+function p52MonthDate(offset){
+  const t = p52Today();
+  return new Date(t.getFullYear(), t.getMonth()+offset, 1);
+}
+
+function p52StatusColor(s){
+  return {E:'var(--ok)',PE:'var(--amber)',NR:'var(--bad)',R:'#a78bfa',NP:'var(--pending)'}[s]||'var(--pending)';
+}
+function p52StatusBg(s){
+  return {E:'rgba(76,175,110,.18)',PE:'rgba(227,179,65,.15)',NR:'rgba(217,106,90,.18)',R:'rgba(167,139,250,.15)',NP:'rgba(255,255,255,.04)'}[s]||'rgba(255,255,255,.04)';
+}
+
+function p52AtvId(area, atv){
+  return encodeKey((area+'__'+atv).toLowerCase().replace(/\s+/g,'_').substring(0,80));
+}
+
+// ── CARREGAMENTO / PERSISTÊNCIA ───────────────────────────────
+
+async function p52LoadMeta(){
+  try{
+    const s = await window.storage.get('p52:meta', true);
+    return s ? JSON.parse(s.value) : null;
+  }catch(e){ return null; }
+}
+
+async function p52SaveMeta(meta){
+  try{ await window.storage.set('p52:meta', JSON.stringify(meta), true); }catch(e){}
+}
+
+async function p52LoadAtividades(){
+  try{
+    const s = await window.storage.get('p52:atividades', true);
+    return s ? JSON.parse(s.value) : [];
+  }catch(e){ return []; }
+}
+
+async function p52SaveAtividades(list){
+  try{ await window.storage.set('p52:atividades', JSON.stringify(list), true); }catch(e){}
+}
+
+async function p52LoadStatusDay(ds){
+  try{
+    const key = 'p52:status:'+ds;
+    const s = await window.storage.get(key, true);
+    return s ? JSON.parse(s.value) : {};
+  }catch(e){ return {}; }
+}
+
+async function p52SaveStatusDay(ds, data){
+  try{
+    const key = 'p52:status:'+ds;
+    await window.storage.set(key, JSON.stringify(data), true);
+  }catch(e){}
+}
+
+// Escuta execuções do Plano de Limpeza em tempo real
+function p52StartFirebaseSync(){
+  if(p52FirebaseListener) return;
+  // Ouve mudanças nos dias relevantes (semana atual)
+  const days = p52GetWeekDates(p52WeekOffset);
+  days.forEach(d => {
+    const ds = p52DateStr(d);
+    fbRoot.child('dias/'+encodeKey(ds)).on('value', snap => {
+      if(!snap.exists()) return;
+      p52SyncDayFromChecklist(ds, snap.val()).then(()=>{
+        if(section === 'p52sem') { p52RenderWeek(); }
+      });
+    });
+  });
+  p52FirebaseListener = true;
+}
+
+// Consolidação: dada a execução do Plano de Limpeza de um dia,
+// marca como E todas as atividades do plano 52 vinculadas ao mesmo local
+async function p52SyncDayFromChecklist(ds, dayData){
+  if(!dayData || !p52Atividades.length) return;
+  const statusDay = await p52LoadStatusDay(ds);
+  let changed = false;
+
+  // Percorre todos os locais executados
+  for(const [locKey, locData] of Object.entries(dayData)){
+    const locName = decodeKey(locKey);
+    // Acha turnos com execuções (done)
+    for(const [turnKey, turnData] of Object.entries(locData)){
+      if(typeof turnData !== 'object') continue;
+      for(const [occIdx, occData] of Object.entries(turnData)){
+        if(!occData || occData.state !== 'done') continue;
+        const executor = occData.who || occData.employee || '';
+        const ts = occData.ts || occData.time || '';
+
+        // Marca todas as atividades do plano 52 vinculadas a este local neste dia
+        const matching = p52Atividades.filter(a => {
+          if(a.fonte === 'extra') return p52MatchLocal(a.area, locName);
+          return p52MatchLocal(P52_ALIAS[a.area] || a.area, locName);
+        });
+
+        for(const atv of matching){
+          const aid = atv.id;
+          // Só auto-marca se não foi setado manualmente
+          if(!statusDay[aid] || (!statusDay[aid].manual && statusDay[aid].status !== 'E')){
+            statusDay[aid] = {status:'E', resp: executor, ts, manual:false};
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  if(changed) await p52SaveStatusDay(ds, statusDay);
+  if(ds in p52StatusCache) p52StatusCache[ds] = statusDay;
+}
+
+// Verifica se dois nomes de local são equivalentes (alias ou substring)
+function p52MatchLocal(a, b){
+  if(!a||!b) return false;
+  const n = s => s.toLowerCase().trim().replace(/[^a-z0-9]/g,'');
+  return n(a) === n(b) || n(a).includes(n(b)) || n(b).includes(n(a));
+}
+
+// Consolidação diária às 00:00 (idempotente)
+async function p52ConsolidatePreviousDay(){
+  const today = p52Today();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+  const ds = p52DateStr(yesterday);
+  const statusDay = await p52LoadStatusDay(ds);
+  let changed = false;
+
+  // Busca execuções reais do Plano de Limpeza
+  const dayData = await loadDay(ds);
+
+  // Primeiro sincroniza execuções
+  if(dayData) await p52SyncDayFromChecklist(ds, dayData);
+
+  // Recarrega após sync
+  const statusAfter = await p52LoadStatusDay(ds);
+
+  // Para cada atividade planejada do dia, se ainda sem status → PE
+  for(const atv of p52Atividades){
+    const aid = atv.id;
+    if(!statusAfter[aid]){
+      // Verifica se estava planejada (freq D = sempre, S/Q = conforme regra)
+      if(p52IsPlanned(atv, yesterday)){
+        statusAfter[aid] = {status:'PE', resp:'', ts:'', manual:false};
+        changed = true;
+      }
+    }
+  }
+  if(changed) await p52SaveStatusDay(ds, statusAfter);
+}
+
+function p52IsPlanned(atv, date){
+  if(atv.freq==='D') return true;
+  if(atv.freq==='S') return date.getDay()===1; // segundas
+  if(atv.freq==='Q'){
+    const weekNum = p52WeekNum(date);
+    return weekNum%2===1;
+  }
+  return true;
+}
+
+// Scheduler consolidação às 00:00
+function p52ScheduleConsolidation(){
+  const now = p52Today();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0, 0, 5);
+  const msUntil = midnight - now;
+  setTimeout(async ()=>{
+    await p52ConsolidatePreviousDay();
+    p52ScheduleConsolidation(); // reagenda para próximo dia
+  }, msUntil);
+}
+
+// ── IMPORTAÇÃO DO EXCEL (SheetJS) ────────────────────────────
+
+async function p52ParseExcel(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = e => {
+      try{
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, {type:'array'});
+        // Encontra aba Plan PT
+        const sheetName = wb.SheetNames.find(n=>n.trim().toLowerCase().includes('plan') && n.toLowerCase().includes('pt'));
+        if(!sheetName) throw new Error('Aba "Plan PT" não encontrada no Excel.');
+        const ws = wb.Sheets[sheetName];
+        resolve({wb, ws, sheetName});
+      }catch(err){ reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function p52ExtractFromSheet(ws){
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const maxRow = range.e.r+1;
+  const maxCol = range.e.c+1;
+
+  const cellVal = (r,c) => {
+    const cell = ws[XLSX.utils.encode_cell({r,c})];
+    return cell ? cell.v : null;
+  };
+
+  // Encontra linha de cabeçalho (contém 'Área' e 'Atividade')
+  let headerRow = -1;
+  for(let r=0;r<30;r++){
+    for(let c=0;c<20;c++){
+      const v = cellVal(r,c);
+      if(v && String(v).trim()==='Área'){ headerRow=r; break; }
+    }
+    if(headerRow>=0) break;
+  }
+  if(headerRow<0) throw new Error('Estrutura do Excel não reconhecida (cabeçalho não encontrado).');
+
+  const dateRow = headerRow+1; // linha com dias do mês
+  const monthRow = headerRow-1; // linha com nomes dos meses
+
+  // Mapeia meses
+  const MES_MAP = {
+    'JANEIRO':1,'ENERO':1,'FEVEREIRO':2,'FEBRERO':2,'MARÇO':3,'MARZO':3,' ':3,
+    'ABRIL':4,'MAYO':5,'JUNIO':6,'JULIO':7,'AGOSTO':8,'SEPTIEMBRE':9,
+    'OCTUBRE':10,'NOVIEMBRE':11,'DICIEMBRE':12,'OUTUBRO':10,'NOVEMBRO':11,'DEZEMBRO':12
+  };
+  const monthStarts = [];
+  for(let c=0;c<maxCol;c++){
+    const v = cellVal(monthRow,c);
+    if(v!=null){
+      const key = String(v).trim();
+      if(MES_MAP[key]!==undefined) monthStarts.push({col:c, mes:MES_MAP[key]});
+    }
+  }
+
+  // Mapa col → data
+  const colToDate = {};
+  for(let i=0;i<monthStarts.length;i++){
+    const {col:cStart, mes} = monthStarts[i];
+    const cEnd = i+1<monthStarts.length ? monthStarts[i+1].col : maxCol;
+    for(let c=cStart;c<cEnd;c++){
+      const day = cellVal(dateRow,c);
+      if(day!=null && !isNaN(day)){
+        try{ colToDate[c] = new Date(2026,mes-1,parseInt(day)); }catch(e){}
+      }
+    }
+  }
+
+  // Extrai atividades
+  const atividades = [];
+  let currentArea = null;
+  const dataStart = dateRow+2;
+
+  for(let r=dataStart;r<maxRow;r++){
+    const areaCell = cellVal(r,2);
+    if(areaCell && String(areaCell).trim()) currentArea = String(areaCell).trim();
+    const atvCell = cellVal(r,5);
+    const freqCell = cellVal(r,8);
+    const t1Cell = cellVal(r,9);
+    const t2Cell = cellVal(r,10);
+    if(!atvCell || !freqCell) continue;
+    if(currentArea === 'Buffers') continue; // REMOVIDO
+
+    const atv = String(atvCell).trim();
+    const freq = String(freqCell).trim();
+    const turno = [t1Cell,t2Cell].filter(t=>typeof t==='string').join('/') || '1T';
+
+    // Coleta planning
+    const planning = {};
+    for(const [col,date] of Object.entries(colToDate)){
+      const v = cellVal(r,parseInt(col));
+      if(v!=null){ planning[p52DateStr(date)] = String(v).trim(); }
+    }
+
+    const id = p52AtvId(currentArea||'', atv);
+    atividades.push({id, area:currentArea||'', atividade:atv, freq, turno, planning, fonte:'excel'});
+  }
+
+  return {atividades, colToDate};
+}
+
+async function p52DoImport(file, onProgress){
+  onProgress('Lendo arquivo Excel…');
+  const {ws} = await p52ParseExcel(file);
+
+  onProgress('Extraindo atividades…');
+  const {atividades} = p52ExtractFromSheet(ws);
+
+  onProgress('Adicionando áreas extras (Sorter, Mezanino, HS, HV)…');
+  // Áreas extras: gera planejamento igual às atividades D para todo o ano 2026
+  const extraAtv = [];
+  for(const area of P52_AREAS_EXTRA){
+    for(const a of area.atividades){
+      const id = p52AtvId(area.nome, a.atv);
+      const planning = {};
+      for(let m=0;m<12;m++){
+        const dias = new Date(2026,m+1,0).getDate();
+        for(let d=1;d<=dias;d++){
+          const dt = new Date(2026,m,d);
+          planning[p52DateStr(dt)] = 'P';
+        }
+      }
+      extraAtv.push({id, area:area.nome, atividade:a.atv, freq:a.freq, turno:a.turno, planning, fonte:'extra'});
+    }
+  }
+
+  const all = [...atividades, ...extraAtv];
+  onProgress('Gravando '+all.length+' atividades…');
+  await p52SaveAtividades(all);
+  p52Atividades = all;
+
+  const meta = {importedAt: new Date().toISOString(), totalAtv:all.length, version:1};
+  await p52SaveMeta(meta);
+  p52Meta = meta;
+
+  onProgress('Sincronizando execuções passadas (Jul–Ago 2026)…');
+  await p52SyncRetroactive();
+
+  onProgress('Concluído!');
+  return {total:all.length, extras:extraAtv.length, fromExcel:atividades.length};
+}
+
+async function p52SyncRetroactive(){
+  // Sincroniza Jul/Ago 2026 com o Plano de Limpeza já existente
+  const start = new Date(2026,6,1);
+  const today = p52Today();
+  const end = new Date(Math.min(today.getTime(), new Date(2026,7,31).getTime()));
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
+    const ds = p52DateStr(new Date(d));
+    try{
+      const dayData = await loadDay(ds);
+      if(dayData) await p52SyncDayFromChecklist(ds, dayData);
+    }catch(e){}
+  }
+}
+
+// ── RENDER PRINCIPAL ──────────────────────────────────────────
+
+async function renderP52(){
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="loading">Carregando Plano 52 Semanas…</div>';
+
+  p52Meta = await p52LoadMeta();
+  p52Atividades = await p52LoadAtividades();
+
+  if(!p52Meta || !p52Atividades.length){
+    renderP52Import();
+    return;
+  }
+  renderP52Main();
+}
+
+// ── TELA DE IMPORTAÇÃO ────────────────────────────────────────
+
+function renderP52Import(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+<div style="max-width:700px;margin:0 auto;">
+  <div style="background:var(--panel);border:2px dashed var(--line);border-radius:16px;padding:48px 32px;text-align:center;margin-bottom:24px;" id="p52DropZone">
+    <div style="font-size:48px;margin-bottom:16px;">📊</div>
+    <h2 style="font-size:20px;font-weight:700;margin-bottom:8px;">Importar Plano de 52 Semanas</h2>
+    <p style="font-size:14px;color:var(--text-dim);margin-bottom:24px;line-height:1.6;">
+      Selecione o arquivo <strong style="color:var(--teal-bright);">Plano de 52 Semanas - Limpeza.xlsx</strong><br>
+      O sistema vai ler, validar e mostrar uma prévia antes de importar.
+    </p>
+    <input type="file" id="p52FileInput" accept=".xlsx" style="display:none">
+    <button class="btn" onclick="document.getElementById('p52FileInput').click()" style="font-size:15px;padding:14px 32px;">
+      📂 Selecionar arquivo Excel
+    </button>
+    <div style="font-size:12px;color:var(--text-dim);margin-top:12px;">
+      Apenas .xlsx · Aba "Plan PT" · Áreas Buffers serão ignoradas
+    </div>
+  </div>
+
+  <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;">
+    <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;">Áreas que serão criadas automaticamente no sistema</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ Sorter</span>
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ Mezanino</span>
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ HS</span>
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ HV</span>
+      <span style="background:rgba(217,106,90,.12);color:var(--bad);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">× Buffers removido</span>
+    </div>
+    <div style="margin-top:14px;font-size:12px;color:var(--text-dim);">
+      <strong style="color:var(--text);">Legenda após importação:</strong>
+      <span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:rgba(76,175,110,.15);color:var(--ok);font-weight:700;">E</span> Executado &nbsp;
+      <span style="padding:2px 8px;border-radius:4px;background:rgba(227,179,65,.15);color:var(--amber);font-weight:700;">PE</span> Pendente &nbsp;
+      <span style="padding:2px 8px;border-radius:4px;background:rgba(217,106,90,.15);color:var(--bad);font-weight:700;">NR</span> Não Realizado &nbsp;
+      <span style="padding:2px 8px;border-radius:4px;background:rgba(167,139,250,.15);color:#a78bfa;font-weight:700;">R</span> Reprogramado
+    </div>
+  </div>
+
+  <div id="p52ImportStatus" style="margin-top:16px;"></div>
+</div>`;
+
+  const input = document.getElementById('p52FileInput');
+  input.addEventListener('change', e => {
+    if(e.target.files[0]) p52HandleFileSelected(e.target.files[0]);
+  });
+
+  // Drag & drop
+  const dz = document.getElementById('p52DropZone');
+  dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.style.borderColor='var(--teal-bright)'; });
+  dz.addEventListener('dragleave', ()=>{ dz.style.borderColor='var(--line)'; });
+  dz.addEventListener('drop', e=>{ e.preventDefault(); dz.style.borderColor='var(--line)'; if(e.dataTransfer.files[0]) p52HandleFileSelected(e.dataTransfer.files[0]); });
+}
+
+async function p52HandleFileSelected(file){
+  const status = document.getElementById('p52ImportStatus');
+  status.innerHTML = `<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;text-align:center;">
+    <div style="font-size:24px;margin-bottom:8px;">⚙️</div>
+    <div id="p52ProgMsg" style="font-size:14px;color:var(--text-dim);">Iniciando…</div>
+    <div style="height:4px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin:12px 0;">
+      <div style="height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-bright));animation:loadAnim 1.4s ease-in-out infinite;"></div>
+    </div>
+  </div>`;
+
+  const setMsg = m => { const el=document.getElementById('p52ProgMsg'); if(el) el.textContent=m; };
+
+  try{
+    // Prévia rápida
+    setMsg('Lendo arquivo Excel…');
+    const {ws} = await p52ParseExcel(file);
+    setMsg('Analisando estrutura…');
+    const {atividades} = p52ExtractFromSheet(ws);
+    const total = atividades.length + P52_AREAS_EXTRA.reduce((s,a)=>s+a.atividades.length,0);
+
+    // Mostra prévia
+    status.innerHTML = `
+<div style="background:var(--panel);border:1px solid var(--teal);border-radius:12px;padding:20px;">
+  <div style="font-size:15px;font-weight:700;margin-bottom:16px;">📋 Prévia da Importação</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;">
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">${atividades.length}</div>
+      <div style="font-size:11px;color:var(--text-dim);">Do Excel</div>
+    </div>
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">+${P52_AREAS_EXTRA.reduce((s,a)=>s+a.atividades.length,0)}</div>
+      <div style="font-size:11px;color:var(--text-dim);">Sorter/Mez/HS/HV</div>
+    </div>
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">${total}</div>
+      <div style="font-size:11px;color:var(--text-dim);">Total de atividades</div>
+    </div>
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">52</div>
+      <div style="font-size:11px;color:var(--text-dim);">Semanas · 2026</div>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;background:rgba(227,179,65,.08);border:1px solid rgba(227,179,65,.2);border-radius:8px;padding:10px;">
+    ⚠️ <strong style="color:var(--amber);">Buffers</strong> removido do plano · 
+    Execuções do Plano de Limpeza de <strong>Jul–Ago</strong> serão sincronizadas retroativamente.
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <button class="btn" id="p52ConfirmBtn" style="background:var(--ok);color:#06210f;padding:12px 28px;font-size:14px;">✅ Confirmar importação</button>
+    <button class="btn secondary" onclick="renderP52Import()">Cancelar</button>
+  </div>
+  <div id="p52ImportProgress" style="margin-top:12px;"></div>
+</div>`;
+
+    document.getElementById('p52ConfirmBtn').addEventListener('click', async ()=>{
+      document.getElementById('p52ConfirmBtn').disabled = true;
+      document.getElementById('p52ConfirmBtn').textContent = '⏳ Importando…';
+      const prog = document.getElementById('p52ImportProgress');
+      const result = await p52DoImport(file, msg=>{
+        if(prog) prog.innerHTML = `<div style="font-size:13px;color:var(--text-dim);">${msg}</div>`;
+      });
+      p52StartFirebaseSync();
+      p52ScheduleConsolidation();
+      renderP52Main();
+    });
+
+  }catch(err){
+    status.innerHTML = `<div style="background:rgba(217,106,90,.1);border:1px solid var(--bad);border-radius:10px;padding:16px;color:var(--bad);">
+      ❌ Erro ao ler Excel: ${err.message}
+    </div>`;
+  }
+}
+
+// ── TELA PRINCIPAL ────────────────────────────────────────────
+
+function renderP52Main(){
+  const app = document.getElementById('app');
+  const isAdmin = document.getElementById('navAdmin')?.classList.contains('active');
+
+  app.innerHTML = `
+<style>
+.p52-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 0;margin-bottom:14px;border-bottom:1px solid var(--line);}
+.p52-toolbar select{background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:8px;font-size:13px;font-family:inherit;}
+.p52-vseg{display:flex;background:rgba(0,0,0,.25);border-radius:8px;padding:3px;gap:2px;}
+.p52-vseg button{border:none;background:transparent;color:#cfeae7;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;}
+.p52-vseg button.active{background:var(--bg);color:var(--teal-bright);}
+.p52-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12px;color:var(--text-dim);}
+.p52-legend .li{display:flex;align-items:center;gap:5px;}
+.p52-cell{width:36px;height:28px;border-radius:5px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .1s;border:1px solid transparent;user-select:none;}
+.p52-cell:hover{transform:scale(1.12);}
+.p52-cell.E{background:rgba(76,175,110,.2);color:var(--ok);border-color:rgba(76,175,110,.4);}
+.p52-cell.PE{background:rgba(227,179,65,.15);color:var(--amber);border-color:rgba(227,179,65,.3);}
+.p52-cell.NR{background:rgba(217,106,90,.2);color:var(--bad);border-color:rgba(217,106,90,.4);}
+.p52-cell.R{background:rgba(167,139,250,.15);color:#a78bfa;border-color:rgba(167,139,250,.3);}
+.p52-cell.NP{background:var(--panel-2);color:var(--text-dim);opacity:.45;cursor:default;}
+.p52-cell.future{background:transparent;border-color:transparent;color:var(--text-dim);opacity:.2;cursor:default;}
+.p52-week-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.p52-table{border-collapse:collapse;width:100%;min-width:700px;}
+.p52-table th{background:var(--panel-2);color:var(--teal-bright);font-size:12px;font-weight:700;padding:8px 6px;text-align:center;border:1px solid var(--line);white-space:nowrap;}
+.p52-table th.today-col{background:rgba(63,214,201,.12);color:var(--teal-bright);}
+.p52-table th.col-area{text-align:left;min-width:130px;padding-left:12px;}
+.p52-table th.col-atv{text-align:left;min-width:170px;padding-left:10px;}
+.p52-table th.col-freq{min-width:40px;}
+.p52-table td{border:1px solid var(--line);padding:4px 5px;vertical-align:middle;}
+.p52-table td.area-hdr{background:var(--panel-2);font-size:11px;font-weight:700;color:var(--teal-bright);text-transform:uppercase;letter-spacing:.4px;padding:7px 12px;}
+.p52-table td.atv-name{font-size:12.5px;font-weight:600;padding:6px 10px;max-width:200px;line-height:1.3;}
+.p52-table td.atv-freq{text-align:center;font-size:11px;color:var(--dim);}
+.p52-table td.today-col{background:rgba(63,214,201,.04);}
+.p52-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.p52-nav .lbl{font-size:15px;font-weight:700;}
+.p52-nav .sub{font-size:12px;color:var(--text-dim);}
+.p52-prog{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.p52-prog .prog-lbl{font-size:12px;color:var(--text-dim);min-width:120px;}
+.p52-prog .prog-track{flex:1;height:7px;background:var(--panel-2);border-radius:5px;overflow:hidden;}
+.p52-prog .prog-fill{height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-bright));border-radius:5px;transition:width .3s;}
+.p52-prog .prog-pct{font-size:13px;font-weight:700;color:var(--teal-bright);min-width:40px;text-align:right;}
+/* Context menu */
+.p52-ctx{position:fixed;background:var(--panel);border:1px solid var(--teal);border-radius:10px;z-index:9999;min-width:180px;box-shadow:0 8px 28px rgba(0,0,0,.5);padding:6px 0;}
+.p52-ctx button{display:block;width:100%;background:transparent;border:none;color:var(--text);padding:10px 16px;font-size:13px;text-align:left;cursor:pointer;}
+.p52-ctx button:hover{background:var(--panel-2);color:var(--teal-bright);}
+.p52-ctx .ctx-sep{height:1px;background:var(--line);margin:4px 0;}
+/* Visão mensal */
+.p52-month-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;}
+.p52-month-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.p52-month-card-head{background:var(--panel-2);padding:9px 14px;font-size:12px;font-weight:700;color:var(--teal-bright);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--line);}
+.p52-month-row{padding:8px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;}
+.p52-month-row:last-child{border-bottom:none;}
+.p52-month-atv{flex:1;font-size:12.5px;font-weight:600;line-height:1.3;}
+.p52-mini-bar{display:flex;gap:2px;flex-wrap:wrap;max-width:160px;}
+.p52-mini-d{width:9px;height:9px;border-radius:2px;}
+/* Visão anual */
+.p52-annual-wrap{overflow-x:auto;}
+.p52-annual-table{border-collapse:collapse;width:100%;min-width:900px;}
+.p52-annual-table th{background:var(--panel-2);color:var(--teal-bright);font-size:11px;font-weight:700;padding:7px 8px;text-align:center;border:1px solid var(--line);}
+.p52-annual-table th.col-l{text-align:left;min-width:110px;}
+.p52-annual-table th.col-atv{text-align:left;min-width:160px;}
+.p52-annual-table td{border:1px solid var(--line);padding:4px 5px;text-align:center;font-size:11px;}
+.p52-annual-table td.col-l{text-align:left;font-size:11px;color:var(--text-dim);padding-left:10px;}
+.p52-annual-table td.col-atv{text-align:left;font-weight:600;font-size:12px;padding-left:8px;}
+.p52-ann-cell{display:inline-block;width:36px;border-radius:4px;font-size:10px;font-weight:700;padding:2px 0;text-align:center;}
+@keyframes loadAnim{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
+</style>
+
+<div class="p52-toolbar">
+  <div class="p52-vseg">
+    <button id="p52vSem" onclick="p52SetView('semana')" class="active">Semana</button>
+    <button id="p52vMes" onclick="p52SetView('mes')">Mês</button>
+    <button id="p52vAno" onclick="p52SetView('ano')">Anual</button>
+  </div>
+  <select id="p52fArea" onchange="p52Filters.area=this.value;p52RenderCurrent()">
+    <option value="">Todas as áreas</option>
+    ${[...new Set(p52Atividades.map(a=>a.area))].sort().map(a=>`<option>${a}</option>`).join('')}
+  </select>
+  <select id="p52fTurno" onchange="p52Filters.turno=this.value;p52RenderCurrent()">
+    <option value="">Todos os turnos</option>
+    <option value="1T">1T — Diurno</option>
+    <option value="2T">2T — Noturno</option>
+  </select>
+  <select id="p52fStatus" onchange="p52Filters.status=this.value;p52RenderCurrent()">
+    <option value="">Todos os status</option>
+    <option value="E">E — Executado</option>
+    <option value="PE">PE — Pendente</option>
+    <option value="NR">NR — Não Realizado</option>
+    <option value="R">R — Reprogramado</option>
+  </select>
+  <select id="p52fFreq" onchange="p52Filters.freq=this.value;p52RenderCurrent()">
+    <option value="">Todas as frequências</option>
+    <option value="D">D — Diária</option>
+    <option value="S">S — Semanal</option>
+    <option value="Q">Q — Quinzenal</option>
+  </select>
+  <button class="btn secondary" style="padding:7px 12px;font-size:12px;margin-left:auto;" onclick="p52ShowUpdateModal()">🔄 Atualizar Excel</button>
+  ${isAdmin?`<button class="btn secondary" style="padding:7px 12px;font-size:12px;color:var(--amber);border-color:rgba(227,179,65,.3);" onclick="p52ConsolidatePreviousDay().then(()=>p52RenderCurrent())">🔒 Fechar dia</button>`:''}
+</div>
+
+<div class="p52-legend">
+  <div class="li"><div class="p52-cell E" style="cursor:default;width:28px;height:22px;font-size:10px;">E</div> Executado (automático)</div>
+  <div class="li"><div class="p52-cell PE" style="cursor:default;width:28px;height:22px;font-size:10px;">PE</div> Pendente</div>
+  <div class="li"><div class="p52-cell NR" style="cursor:default;width:28px;height:22px;font-size:10px;">NR</div> Não Realizado</div>
+  <div class="li"><div class="p52-cell R" style="cursor:default;width:28px;height:22px;font-size:10px;">R</div> Reprogramado</div>
+  <div class="li"><div class="p52-cell NP" style="cursor:default;width:28px;height:22px;font-size:10px;">NP</div> Não Planejado</div>
+</div>
+
+<div id="p52ViewContainer"></div>
+<div id="p52CtxMenu" class="p52-ctx" style="display:none;"></div>`;
+
+  p52SetView('semana');
+  p52StartFirebaseSync();
+  p52ScheduleConsolidation();
+
+  // Fecha ctx menu ao clicar fora
+  document.addEventListener('click', ()=>{ document.getElementById('p52CtxMenu').style.display='none'; }, true);
+}
+
+function p52SetView(v){
+  p52View = v;
+  ['Sem','Mes','Ano'].forEach(x=>document.getElementById('p52v'+x)?.classList.remove('active'));
+  document.getElementById('p52v'+v.charAt(0).toUpperCase()+v.slice(1))?.classList.add('active');
+  p52RenderCurrent();
+}
+
+async function p52RenderCurrent(){
+  if(p52View==='semana') await p52RenderWeek();
+  else if(p52View==='mes') await p52RenderMonth();
+  else await p52RenderAnnual();
+}
+
+// ── VISÃO SEMANAL ─────────────────────────────────────────────
+
+async function p52RenderWeek(){
+  const cont = document.getElementById('p52ViewContainer');
+  if(!cont) return;
+  const days = p52GetWeekDates(p52WeekOffset);
+  const today = p52Today();
+  const todayStr = p52DateStr(today);
+
+  // Carrega status de todos os dias da semana
+  const statuses = {};
+  await Promise.all(days.map(async d=>{
+    const ds = p52DateStr(d);
+    statuses[ds] = await p52LoadStatusDay(ds);
+    p52StatusCache[ds] = statuses[ds];
+  }));
+
+  const d0=days[0], d6=days[6];
+  const wn = p52WeekNum(days[3]);
+
+  // Filtra atividades
+  let atvs = p52Atividades;
+  if(p52Filters.area) atvs = atvs.filter(a=>a.area===p52Filters.area);
+  if(p52Filters.turno) atvs = atvs.filter(a=>a.turno.includes(p52Filters.turno));
+  if(p52Filters.freq) atvs = atvs.filter(a=>a.freq===p52Filters.freq);
+
+  // Progresso da semana
+  let totalPlan=0, totalE=0;
+  for(const d of days){
+    const ds=p52DateStr(d);
+    if(d>today) continue;
+    for(const atv of atvs){
+      if(!p52IsPlanned(atv,d)) continue;
+      totalPlan++;
+      const st = statuses[ds]?.[atv.id]?.status;
+      if(st==='E') totalE++;
+    }
+  }
+  const pct = totalPlan>0 ? Math.round(totalE/totalPlan*100) : 0;
+
+  // Agrupa por área
+  const areas = [...new Set(atvs.map(a=>a.area))];
+
+  let html = `
+<div class="p52-nav">
+  <button class="nav-btn" onclick="p52WeekOffset--;p52RenderWeek()">‹</button>
+  <div>
+    <div class="p52-nav lbl" style="margin:0;">Semana ${wn} — ${P52_MESES[days[3].getMonth()]} ${days[3].getFullYear()}</div>
+    <div class="p52-nav sub" style="margin:0;">${d0.toLocaleDateString('pt-BR')} → ${d6.toLocaleDateString('pt-BR')}</div>
+  </div>
+  <button class="nav-btn" onclick="p52WeekOffset++;p52RenderWeek()">›</button>
+  <button class="btn secondary" style="padding:5px 10px;font-size:12px;" onclick="p52WeekOffset=0;p52RenderWeek()">Hoje</button>
+</div>
+<div class="p52-prog">
+  <div class="prog-lbl">Semana ${wn} · execução</div>
+  <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+  <div class="prog-pct">${pct}%</div>
+</div>
+<div class="p52-week-wrap"><table class="p52-table"><thead><tr>
+  <th class="col-area">Área</th>
+  <th class="col-atv">Atividade</th>
+  <th class="col-freq">Freq</th>`;
+
+  days.forEach(d=>{
+    const ds=p52DateStr(d);
+    const isTod = ds===todayStr;
+    html+=`<th class="${isTod?'today-col':''}">${P52_DIAS[d.getDay()]}<br><span style="font-size:15px;font-weight:800;">${d.getDate()}</span></th>`;
+  });
+  html+=`</tr></thead><tbody>`;
+
+  for(const area of areas){
+    const areaAtvs = atvs.filter(a=>a.area===area);
+    if(!areaAtvs.length) continue;
+    html+=`<tr><td colspan="${3+days.length}" class="area-hdr">${area}${area===p52Atividades.find(a=>a.area===area)?.fonte==='extra'?' <span style="font-size:10px;color:var(--teal-b);opacity:.7;">(adicionado)</span>':''}</td></tr>`;
+
+    for(const atv of areaAtvs){
+      // Filtro de status
+      if(p52Filters.status){
+        const hasStatus = days.some(d=>{
+          const ds=p52DateStr(d);
+          return (statuses[ds]?.[atv.id]?.status||'NP')===p52Filters.status;
+        });
+        if(!hasStatus) continue;
+      }
+
+      html+=`<tr><td class="atv-name" colspan="1" style="font-size:11px;color:var(--text-dim);padding:5px 10px;">${atv.area}</td>
+        <td class="atv-name">${atv.atividade}</td>
+        <td class="atv-freq">${atv.freq}</td>`;
+
+      for(const d of days){
+        const ds=p52DateStr(d);
+        const isTod=ds===todayStr;
+        const isFut=d>today;
+        const planned=p52IsPlanned(atv,d);
+        const st = statuses[ds]?.[atv.id]?.status || (planned?(isFut?'future':'PE'):'NP');
+        const resp = statuses[ds]?.[atv.id]?.resp||'';
+        const manual = statuses[ds]?.[atv.id]?.manual||false;
+
+        const cellClass = isFut?'future':(!planned?'NP':st);
+        const title = `${atv.atividade} · ${d.toLocaleDateString('pt-BR')}${resp?' · '+resp:''}${manual?' · manual':''}`;
+        const clickable = !isFut && planned;
+
+        html+=`<td class="${isTod?'today-col':''}" style="text-align:center;">
+          <div class="p52-cell ${cellClass}" 
+            title="${title}"
+            ${clickable?`onclick="p52CellClick(event,'${atv.id}','${ds}','${st}','${atv.atividade.replace(/'/g,"\\'")}')"`:''}
+          >${isFut?'·':(planned?st:'—')}</div>
+        </td>`;
+      }
+      html+='</tr>';
+    }
+  }
+
+  html+='</tbody></table></div>';
+  cont.innerHTML = html;
+}
+
+// ── VISÃO MENSAL ──────────────────────────────────────────────
+
+async function p52RenderMonth(){
+  const cont = document.getElementById('p52ViewContainer');
+  const md = p52MonthDate(p52MonthOffset);
+  const year=md.getFullYear(), month=md.getMonth();
+  const daysInMonth = new Date(year,month+1,0).getDate();
+  const today = p52Today();
+
+  // Carrega todos os dias do mês
+  const statuses = {};
+  const promises = [];
+  for(let d=1;d<=daysInMonth;d++){
+    const ds = dateStr(new Date(year,month,d));
+    promises.push(p52LoadStatusDay(ds).then(s=>{ statuses[ds]=s; }));
+  }
+  await Promise.all(promises);
+
+  let atvs = p52Atividades;
+  if(p52Filters.area) atvs=atvs.filter(a=>a.area===p52Filters.area);
+  if(p52Filters.freq) atvs=atvs.filter(a=>a.freq===p52Filters.freq);
+
+  // Progresso do mês
+  let totP=0,totE=0;
+  for(let d=1;d<=daysInMonth;d++){
+    const dt=new Date(year,month,d);
+    if(dt>today) continue;
+    const ds=p52DateStr(dt);
+    for(const atv of atvs){
+      if(!p52IsPlanned(atv,dt)) continue;
+      totP++;
+      if(statuses[ds]?.[atv.id]?.status==='E') totE++;
+    }
+  }
+  const pct=totP>0?Math.round(totE/totP*100):0;
+
+  const areas=[...new Set(atvs.map(a=>a.area))];
+
+  let html=`
+<div class="p52-nav">
+  <button class="nav-btn" onclick="p52MonthOffset--;p52RenderMonth()">‹</button>
+  <div>
+    <div class="p52-nav lbl" style="margin:0;">${P52_MESES[month]} ${year}</div>
+    <div class="p52-nav sub" style="margin:0;">${daysInMonth} dias · ${atvs.length} atividades no filtro</div>
+  </div>
+  <button class="nav-btn" onclick="p52MonthOffset++;p52RenderMonth()">›</button>
+  <button class="btn secondary" style="padding:5px 10px;font-size:12px;" onclick="p52MonthOffset=0;p52RenderMonth()">Hoje</button>
+</div>
+<div class="p52-prog">
+  <div class="prog-lbl">${P52_MESES[month]} · execução</div>
+  <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+  <div class="prog-pct">${pct}%</div>
+</div>
+<div class="p52-month-grid">`;
+
+  for(const area of areas){
+    const areaAtvs=atvs.filter(a=>a.area===area).slice(0,8);
+    if(!areaAtvs.length) continue;
+    html+=`<div class="p52-month-card"><div class="p52-month-card-head">${area}</div>`;
+    for(const atv of areaAtvs){
+      let exec=0,total=0,mini='';
+      for(let d=1;d<=daysInMonth;d++){
+        const dt=new Date(year,month,d);
+        const ds=p52DateStr(dt);
+        const isFut=dt>today;
+        if(!p52IsPlanned(atv,dt)){mini+=`<div class="p52-mini-d" style="background:var(--panel-2);opacity:.3;"></div>`;continue;}
+        total++;
+        const st=statuses[ds]?.[atv.id]?.status||(isFut?'future':'PE');
+        if(st==='E') exec++;
+        const bg={E:'var(--ok)',PE:'var(--amber)',NR:'var(--bad)',R:'#a78bfa',future:'var(--panel-2)'}[st]||'var(--panel-2)';
+        const op=isFut?'opacity:.25;':'';
+        mini+=`<div class="p52-mini-d" style="background:${bg};${op}" title="${d}/${month+1}: ${st}"></div>`;
+      }
+      const epct=total>0?Math.round(exec/total*100):0;
+      const bcls=epct>=90?'ok':epct>=60?'mid':'low';
+      const bcolor={'ok':'var(--ok)','mid':'var(--amber)','low':'var(--bad)'}[bcls];
+      html+=`<div class="p52-month-row">
+        <div class="p52-month-atv">${atv.atividade}</div>
+        <div>
+          <div class="p52-mini-bar">${mini}</div>
+          <div style="margin-top:3px;font-size:11px;font-weight:700;color:${bcolor};">${total>0?epct+'%':'—'}</div>
+        </div>
+      </div>`;
+    }
+    html+='</div>';
+  }
+  html+='</div>';
+  cont.innerHTML=html;
+}
+
+// ── VISÃO ANUAL ───────────────────────────────────────────────
+
+async function p52RenderAnnual(){
+  const cont=document.getElementById('p52ViewContainer');
+  const today=p52Today();
+  let atvs=p52Atividades;
+  if(p52Filters.area) atvs=atvs.filter(a=>a.area===p52Filters.area);
+  if(p52Filters.freq) atvs=atvs.filter(a=>a.freq===p52Filters.freq);
+
+  // Calcula % por mês por atividade (usando planning do Excel como base)
+  let html=`
+<div class="p52-nav" style="margin-bottom:14px;">
+  <div class="p52-nav lbl" style="margin:0;">2026 — Visão Anual</div>
+</div>
+<div class="p52-annual-wrap"><table class="p52-annual-table"><thead><tr>
+  <th class="col-l">Área</th><th class="col-atv">Atividade</th>`;
+
+  const MESES_ABREV=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  MESES_ABREV.forEach(m=>html+=`<th>${m}</th>`);
+  html+=`</tr></thead><tbody>`;
+
+  // Agrupa por área
+  const areas=[...new Set(atvs.map(a=>a.area))];
+  for(const area of areas){
+    const areaAtvs=atvs.filter(a=>a.area===area);
+    areaAtvs.forEach((atv,ai)=>{
+      html+=`<tr>`;
+      if(ai===0) html+=`<td class="col-l" rowspan="${areaAtvs.length}" style="font-weight:700;color:var(--teal-bright);vertical-align:top;padding-top:10px;">${area}</td>`;
+      html+=`<td class="col-atv">${atv.atividade}</td>`;
+      for(let m=0;m<12;m++){
+        const daysInM=new Date(2026,m+1,0).getDate();
+        let plan=0,exec=0;
+        for(let d=1;d<=daysInM;d++){
+          const dt=new Date(2026,m,d);
+          if(dt>today) continue;
+          if(!p52IsPlanned(atv,dt)) continue;
+          const ds=p52DateStr(dt);
+          const pval=atv.planning?.[ds];
+          plan++;
+          // Para anual usamos o planning do Excel como proxy de execução (E no Excel)
+          if(pval==='E') exec++;
+          // E do status cache sobrescreve
+          if(p52StatusCache[ds]?.[atv.id]?.status==='E') exec++;
+        }
+        const pct=plan>0?Math.round(Math.min(exec,plan)/plan*100):0;
+        const isFut=new Date(2026,m+1,0)<today?false:new Date(2026,m,1)>today;
+        let bg,color;
+        if(isFut){bg='var(--panel-2)';color='var(--text-dim)';}
+        else if(pct>=90){bg='rgba(76,175,110,.2)';color='var(--ok)';}
+        else if(pct>=60){bg='rgba(227,179,65,.15)';color='var(--amber)';}
+        else{bg='rgba(217,106,90,.18)';color='var(--bad)';}
+        html+=`<td><div class="p52-ann-cell" style="background:${bg};color:${color};">${isFut||plan===0?'—':pct+'%'}</div></td>`;
+      }
+      html+=`</tr>`;
+    });
+  }
+  html+=`</tbody></table></div>`;
+  cont.innerHTML=html;
+}
+
+// ── CONTEXT MENU (clique na célula) ──────────────────────────
+
+function p52CellClick(e, atvId, ds, currentStatus, atvName){
+  e.stopPropagation();
+  const isAdmin = document.getElementById('navAdmin')?.classList.contains('active');
+  const ctx = document.getElementById('p52CtxMenu');
+  if(!ctx) return;
+
+  const options = [
+    {label:'✅  Marcar como Executado (E)', status:'E'},
+    {label:'⏳  Marcar como Pendente (PE)', status:'PE'},
+    {label:'❌  Marcar como Não Realizado (NR)', status:'NR'},
+    {label:'🔄  Marcar como Reprogramado (R)', status:'R'},
+  ];
+
+  ctx.innerHTML = `<div style="padding:8px 14px;font-size:11px;color:var(--text-dim);font-weight:700;border-bottom:1px solid var(--line);">${atvName}</div>`
+    + options.filter(o=>o.status!==currentStatus).map(o=>
+        `<button onclick="p52SetStatus('${atvId}','${ds}','${o.status}',true)">${o.label}</button>`
+      ).join('')
+    + `<div class="ctx-sep"></div><button style="color:var(--text-dim);" onclick="document.getElementById('p52CtxMenu').style.display='none'">Fechar</button>`;
+
+  const x=Math.min(e.clientX, window.innerWidth-200);
+  const y=Math.min(e.clientY+8, window.innerHeight-200);
+  ctx.style.left=x+'px'; ctx.style.top=y+'px'; ctx.style.display='block';
+}
+
+async function p52SetStatus(atvId, ds, status, manual){
+  const statusDay = await p52LoadStatusDay(ds);
+  statusDay[atvId] = {status, resp: manual?'(manual)':'', ts: new Date().toISOString(), manual:!!manual};
+  await p52SaveStatusDay(ds, statusDay);
+  p52StatusCache[ds] = statusDay;
+  document.getElementById('p52CtxMenu').style.display='none';
+  p52RenderCurrent();
+}
+
+// ── ATUALIZAÇÃO VIA NOVO EXCEL ────────────────────────────────
+
+function p52ShowUpdateModal(){
+  const isAdmin = document.getElementById('navAdmin')?.classList.contains('active');
+  if(!isAdmin){ alert('Apenas administradores podem atualizar o plano.'); return; }
+  const modal = document.createElement('div');
+  modal.id = 'p52UpdateModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML=`
+<div style="background:var(--panel);border:1px solid var(--teal);border-radius:16px;padding:32px;max-width:500px;width:90%;text-align:center;">
+  <div style="font-size:32px;margin-bottom:12px;">🔄</div>
+  <h3 style="margin-bottom:8px;">Atualizar Plano via Excel</h3>
+  <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;line-height:1.6;">
+    Selecione o novo arquivo Excel. O histórico de execuções <strong>não será apagado</strong>.<br>
+    Planejamentos futuros serão atualizados e novas áreas adicionadas.
+  </p>
+  <input type="file" id="p52UpdateFile" accept=".xlsx" style="display:none">
+  <button class="btn" onclick="document.getElementById('p52UpdateFile').click()" style="margin-bottom:12px;padding:12px 28px;">📂 Selecionar novo Excel</button>
+  <br><button class="btn secondary" onclick="document.getElementById('p52UpdateModal').remove()">Cancelar</button>
+  <div id="p52UpdateStatus" style="margin-top:14px;"></div>
+</div>`;
+  document.body.appendChild(modal);
+  document.getElementById('p52UpdateFile').addEventListener('change', async e=>{
+    if(!e.target.files[0]) return;
+    const upd = document.getElementById('p52UpdateStatus');
+    upd.innerHTML=`<div style="font-size:13px;color:var(--text-dim);">Lendo arquivo…</div>`;
+    try{
+      const {ws}=await p52ParseExcel(e.target.files[0]);
+      const {atividades:newAtvs}=p52ExtractFromSheet(ws);
+      const oldIds=new Set(p52Atividades.filter(a=>a.fonte==='excel').map(a=>a.id));
+      const newIds=new Set(newAtvs.map(a=>a.id));
+      const added=newAtvs.filter(a=>!oldIds.has(a.id)).length;
+      const removed=[...oldIds].filter(id=>!newIds.has(id)).length;
+      const unchanged=newAtvs.filter(a=>oldIds.has(a.id)).length;
+      upd.innerHTML=`
+<div style="background:var(--panel-2);border-radius:8px;padding:14px;text-align:left;margin-bottom:14px;">
+  <div style="font-size:13px;margin-bottom:6px;color:var(--ok);">✅ Novos: <strong>${added}</strong> atividades</div>
+  <div style="font-size:13px;margin-bottom:6px;color:var(--bad);">🗑 Removidos do plano: <strong>${removed}</strong></div>
+  <div style="font-size:13px;color:var(--text-dim);">— Sem alteração: <strong>${unchanged}</strong></div>
+</div>
+<button class="btn" style="background:var(--ok);color:#06210f;width:100%;" onclick="p52ApplyUpdate(${JSON.stringify(newAtvs).replace(/"/g,'&quot;')})">Aplicar atualização</button>`;
+    }catch(err){
+      upd.innerHTML=`<div style="color:var(--bad);">Erro: ${err.message}</div>`;
+    }
+  });
+}
+
+async function p52ApplyUpdate(newAtvs){
+  // Preserva extras, substitui somente os do Excel
+  const extras = p52Atividades.filter(a=>a.fonte==='extra');
+  const all = [...newAtvs, ...extras];
+  await p52SaveAtividades(all);
+  p52Atividades = all;
+  const meta = {importedAt:new Date().toISOString(), totalAtv:all.length, version:(p52Meta?.version||1)+1};
+  await p52SaveMeta(meta);
+  p52Meta=meta;
+  document.getElementById('p52UpdateModal')?.remove();
+  renderP52Main();
+}
+
+// ── WIRE NAV ─────────────────────────────────────────────────
+// Usa setTimeout para garantir que o DOM já está pronto após o sistema inicializar
+setTimeout(()=>{
+  const nav52 = document.getElementById('nav52');
+  if(nav52){
+    nav52.addEventListener('click',()=>{
+      section='p52sem';
+      document.querySelectorAll('.mainnav button').forEach(b=>b.classList.remove('active'));
+      nav52.classList.add('active');
+      renderTopControls();
+      renderP52();
+    });
+  }
+}, 0);
 
 </script>
 </body>
