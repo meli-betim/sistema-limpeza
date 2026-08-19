@@ -251,8 +251,11 @@ const LOCATIONS = [
   {name:'Docas Outbound',           f:{T1D:2,T2D:2,T1N:1,T2N:1}},
   {name:'Esferas Inbound',          f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Esferas Outbound',         f:{T1D:1,T2D:1,T1N:1,T2N:1}},
-  {name:'Mezanino',                 f:{T1D:2,T2D:2,T1N:2,T2N:2}},
-  {name:'HS',                       f:{T1D:2,T2D:2,T1N:2,T2N:2}},
+  {name:'Mezanino Piso 0',           f:{T1D:1,T2D:1,T1N:1,T2N:1}},
+  {name:'Mezanino Piso 1',           f:{T1D:1,T2D:1,T1N:1,T2N:1}},
+  {name:'Mezanino Piso 2',           f:{T1D:1,T2D:1,T1N:1,T2N:1}},
+  {name:'Mezanino Piso 3',           f:{T1D:1,T2D:1,T1N:1,T2N:1}},
+  {name:'HS',                       f:{T1D:0,T2D:0,T1N:2,T2N:2}}, // limpeza somente no T2 (T1N/T2N), todos os dias — pares e ímpares
   {name:'Portaria',                 f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Setor Segurança',          f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Apoio ao Motorista lado IN',      f:{T1D:1,T2D:1,T1N:1,T2N:1}},
@@ -293,6 +296,28 @@ const LOCATIONS = [
 const LOCATION_NAMES = LOCATIONS.map(l=>l.name)
   .concat(Array.from({length:153}, (_,i)=>'Doca '+(i+1))) // docas individuais só para a solicitação de limpeza
   .concat(['Outro / não listado']);
+
+/* ===================== CONFIGURAÇÃO HISTÓRICA (proteção de indicadores fechados) =====================
+   Em 19/08/2026 o Mezanino (1 ambiente) foi dividido em 4 (Mezanino Piso 0..3) e o HS passou a ter
+   limpeza somente no T2 (antes era T1D:2,T2D:2,T1N:2,T2N:2). Para não recalcular/alterar os indicadores
+   de períodos já fechados, mantemos aqui a configuração ANTIGA (LOCATIONS_LEGACY), reconstruída a partir
+   de LOCATIONS trocando apenas as entradas de Mezanino/HS pelas antigas — o restante dos ambientes
+   (inclusive banheiros) é o mesmo objeto/config em ambas as listas.
+   getLocationsForDate(date) decide qual configuração usar: datas < CONFIG_CUTOVER_DATE usam a antiga;
+   datas >= CONFIG_CUTOVER_DATE usam a atual (LOCATIONS, já com os 4 Mezaninos e a nova regra do HS).
+   Isso não renomeia nem altera nenhum registro já salvo no Firebase — apenas escolhe, na hora de
+   recalcular os indicadores, qual "grade" de ambientes/frequências aplicar a cada data. */
+const CONFIG_CUTOVER_DATE = '2026-08-19'; // ajuste para a data real de implantação, se necessário
+const LOCATIONS_LEGACY = LOCATIONS
+  .filter(l => !l.name.startsWith('Mezanino Piso') && l.name !== 'HS')
+  .concat([
+    {name:'Mezanino', f:{T1D:2,T2D:2,T1N:2,T2N:2}},
+    {name:'HS',       f:{T1D:2,T2D:2,T1N:2,T2N:2}},
+  ]);
+function getLocationsForDate(date){
+  const ds = dateStr(date);
+  return ds < CONFIG_CUTOVER_DATE ? LOCATIONS_LEGACY : LOCATIONS;
+}
 
 /* ===================== REPORT STATE ===================== */
 let reportPeriod = 'day'; // 'day' | 'week' | 'month'
@@ -776,13 +801,16 @@ async function renderChecklist(){
 
 async function renderDay(){
   const app = document.getElementById('app');
+  // Preserva a posição de rolagem atual (desktop e celular) para restaurar após o re-render.
+  const _scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
   if(!app.innerHTML.includes('loading')) app.innerHTML = '<div class="loading">Carregando...</div>';
   const ds = dateStr(currentDate);
   const data = await loadDay(ds);
+  const dayLocations = getLocationsForDate(currentDate);
 
   let totalOcc=0, doneOcc=0;
   const turns = activeTurns(currentDate);
-  LOCATIONS.forEach(loc=>{
+  dayLocations.forEach(loc=>{
     turns.forEach(t=>{
       const n = resolveFreq(loc, t.key, currentDate);
       for(let i=0;i<n;i++){
@@ -835,7 +863,7 @@ async function renderDay(){
         <span style="color:${tc.accent};">${t.label}</span>
         <span class="count" data-turncount="${t.key}" style="color:${tc.accent};opacity:.7;"></span>
       </div>`;
-    LOCATIONS.forEach(loc=>{
+    dayLocations.forEach(loc=>{
       const n = resolveFreq(loc, t.key, currentDate);
       if(n<=0) return;
       html += `<div class="loc-row" data-locname="${loc.name.toLowerCase()}"><div class="loc-name">${loc.name}</div><div class="occ-list">`;
@@ -900,11 +928,13 @@ async function renderDay(){
     <div class="legend">Clique numa célula para alternar: pendente → concluído → não realizado.</div>
   `;
   app.innerHTML = html;
+  // Restaura a posição de rolagem exatamente onde estava antes do re-render.
+  requestAnimationFrame(()=>{ window.scrollTo(0, _scrollY); });
 
   // contadores por turno
   turns.forEach(t=>{
     let total=0, done=0;
-    LOCATIONS.forEach(loc=>{
+    dayLocations.forEach(loc=>{
       const n = resolveFreq(loc, t.key, currentDate);
       total += n;
       for(let i=0;i<n;i++){
@@ -996,7 +1026,7 @@ async function renderDay(){
           return;
         }
 
-        const loc = LOCATIONS.find(l=>l.name===locName);
+        const loc = dayLocations.find(l=>l.name===locName);
         const dl = loc ? occDeadline(loc, turnKey, idx, currentDate) : null;
         const tooEarly = dl && Date.now() < dl.getTime() - 2*3600000;
         showBlockedAlert(tooEarly ? 'early' : 'late', dl ? fmtTime(dl.getTime() - 2*3600000) : '');
@@ -1090,22 +1120,35 @@ async function renderWeek(){
   days.forEach(d=>{ html += `<th>${dayNames[d.getDay()]}<br>${pad(d.getDate())}/${pad(d.getMonth()+1)}</th>`; });
   html += `</tr></thead><tbody>`;
 
-  LOCATIONS.forEach(loc=>{
-    html += `<tr><td class="locname">${loc.name}</td>`;
+  // Monta a lista de linhas (ambientes) a partir da configuração vigente em CADA dia exibido —
+  // preserva o histórico caso a semana atravesse a data de implantação (CONFIG_CUTOVER_DATE).
+  const weekRowNames = [];
+  const weekRowSeen = new Set();
+  days.forEach(d=>{
+    getLocationsForDate(d).forEach(l=>{
+      if(!weekRowSeen.has(l.name)){ weekRowSeen.add(l.name); weekRowNames.push(l.name); }
+    });
+  });
+
+  weekRowNames.forEach(locName=>{
+    html += `<tr><td class="locname">${locName}</td>`;
     days.forEach(d=>{
       const ds = dateStr(d);
       const data = dataByDay[ds];
+      const loc = getLocationsForDate(d).find(l=>l.name===locName);
       let total=0, done=0, hasBad=false;
-      TURNS.forEach(t=>{
-        const n = resolveFreq(loc, t.key, d);
-        total += n;
-        for(let i=0;i<n;i++){
-          const k = loc.name+'|'+t.key+'|'+i;
-          const st = getEntry(data,k).state;
-          if(st==='done') done++;
-          if(st==='bad') hasBad = true;
-        }
-      });
+      if(loc){
+        TURNS.forEach(t=>{
+          const n = resolveFreq(loc, t.key, d);
+          total += n;
+          for(let i=0;i<n;i++){
+            const k = loc.name+'|'+t.key+'|'+i;
+            const st = getEntry(data,k).state;
+            if(st==='done') done++;
+            if(st==='bad') hasBad = true;
+          }
+        });
+      }
       let cls='empty', label='—';
       if(done===total && total>0){cls='full'; label='✓';}
       else if(hasBad){cls='hasbad'; label=done+'/'+total;}
@@ -1933,7 +1976,9 @@ async function renderReportChecklist(){
     const perTurnDay = {};
     turnsForDay.forEach(t=>{ perTurnDay[t.key]=emptyAcc(); });
 
-    LOCATIONS.forEach(loc=>{
+    // Usa a configuração de ambientes/frequências vigente NA DATA "d" (getLocationsForDate),
+    // e não a configuração atual — protege os indicadores de períodos já fechados.
+    getLocationsForDate(d).forEach(loc=>{
       turnsForDay.forEach(t=>{
         const n=resolveFreq(loc,t.key,d);
         for(let i=0;i<n;i++){
@@ -2153,7 +2198,8 @@ async function renderReportChecklist(){
       turnsForDay.forEach(t=>{
         if(fTurn && t.key!==fTurn) return;
         const col = [{key:'T1D',label:'T1 Par'},{key:'T1N',label:'T2 Par'},{key:'T2D',label:'T1 Ímpar'},{key:'T2N',label:'T2 Ímpar'}].find(x=>x.key===t.key);
-        LOCATIONS.forEach(loc=>{
+        // Configuração vigente na data "d" — protege o detalhamento de períodos já fechados.
+        getLocationsForDate(d).forEach(loc=>{
           if(fLocal && !loc.name.toLowerCase().includes(fLocal.toLowerCase())) return;
           const n = resolveFreq(loc,t.key,d);
           for(let i=0;i<n;i++){
