@@ -904,7 +904,9 @@ async function renderDay(){
         const isBathroom = isBathroomLoc(loc);
         const showTime = isBathroom || !!mealInfo;
         let timeHtml = '';
-        if(entry.ts && showTime){
+        if(entry.ts){
+          // Exibe o horário exato do registro (Concluído/Não realizado) em QUALQUER ambiente,
+          // não só banheiros/refeitório — mantendo o mesmo padrão de exibição já usado no sistema.
           timeHtml = `<div class="occ-time">${fmtTime(entry.ts)}${entry.emp?'<br>'+entry.emp.split(' ')[0]:''}</div>`;
         } else if(dlTime && showTime){
           const timeColor = blocked ? 'var(--bad)' : overdue ? 'var(--bad)' : 'var(--text-dim)';
