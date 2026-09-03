@@ -54,6 +54,7 @@
   <button id="navRequests">Solicitações</button>
   <button id="navReport">Relatório</button>
   <button id="navEfetivo">👷 Efetivo</button>
+  <button id="nav52" style="background:transparent;border:1px solid rgba(227,179,65,.35);color:#e3b341;font-size:12.5px;padding:5px 12px;border-radius:20px;margin:auto 0 auto 4px;">📅 Plano 52 Sem.</button>
   <button id="navUsers" style="display:none;">👥 Usuários</button>
         <button id="navAdmin">🔑 Admin</button>
 </div>
@@ -62,6 +63,7 @@
   <div class="loading">Carregando...</div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script>
@@ -91,7 +93,7 @@ const fbRequestsRef = fbRoot.child('requests');
 
 // Chaves que ficam salvas apenas no navegador local (preferência por dispositivo),
 // em vez de sincronizadas entre todos os usuários.
-const LOCAL_ONLY_KEYS = new Set(['currentEmployee']);
+const LOCAL_ONLY_KEYS = new Set(['currentEmployee', 'userSession', 'adminSession']);
 
 // Wrapper com timeout para evitar travamento em chamadas Firebase
 function withTimeout(promise, ms=8000){
@@ -261,8 +263,7 @@ const LOCATIONS = [
   {name:'Apoio ao Motorista lado IN',      f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Apoio ao Motorista lado OUT',     f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Apoio ao Motorista Externo',      f:{T1D:1,T2D:1,T1N:1,T2N:1}},
-  {name:'Salas de Descompressão',   f:{T1D:2,T2D:2,T1N:1,T2N:1}},
-  {name:'Área de Descompressão',    f:{T1D:2,T2D:2,T1N:1,T2N:1}},
+  {name:'Área de Descompressão',    f:{T1D:2,T2D:2,T1N:1,T2N:1}}, // consolidado: 'Salas de Descompressão' foi unificado aqui (mesmo espaço físico)
   {name:'Ambulatório',              f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Banheiro Ambulatório',     f:{T1D:2,T2D:2,T1N:2,T2N:2}},
   {name:'Sala de Reunião',          f:{T1D:1,T2D:1,T1N:1,T2N:1}},
@@ -271,7 +272,8 @@ const LOCATIONS = [
   {name:'Setor ADM',                f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Sala TI',                  f:{T1D:1,T2D:1,T1N:0,T2N:0}}, // ajustado: 1x no T1, par e ímpar (antes era em todos os turnos)
   {name:'Sala de Monitoramento',    f:{T1D:1,T2D:1,T1N:1,T2N:1}},
-  {name:'Sala de Treinamento',      f:{T1D:1,T2D:1,T1N:1,T2N:1}},
+  {name:'Sala Ladicá',              f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // substitui 'Sala de Treinamento' (dividida em 2 salas)
+  {name:'Sala Ladilá',              f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // substitui 'Sala de Treinamento' (dividida em 2 salas)
   {name:'Sala Staff',               f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Almoxarifado',             f:{T1D:1,T2D:1,T1N:1,T2N:1}},
   {name:'Depósito EPI',             f:{T1D:1,T2D:1,T1N:1,T2N:1}},
@@ -292,6 +294,10 @@ const LOCATIONS = [
   {name:'HV',                       f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // 1x por turno — 1x no T1 e 1x no T2
   {name:'RK',                       f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // 1x por turno — 1x no T1 e 1x no T2
   {name:'Refeitório Meli',          f:{T1D:3,T2D:3,T1N:1,T2N:1}, meals:REFEITORIO_MELI_MEALS}, // Desjejum 06:20-08:40, Almoço 11:30-14:30, Lanche 16:20-17:40 (T1); Jantar 20:30-23:30 (T2)
+  // ===== Novos locais (padronização) =====
+  {name:'Sala de Plant',            f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // 1x por turno
+  {name:'Sala de Amamentação',      f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // 1x por turno
+  {name:'Oficina de Manutenção',    f:{T1D:1,T2D:1,T1N:1,T2N:1}}, // 1x por turno
 ];
 const LOCATION_NAMES = LOCATIONS.map(l=>l.name)
   .concat(Array.from({length:153}, (_,i)=>'Doca '+(i+1))) // docas individuais só para a solicitação de limpeza
@@ -412,6 +418,18 @@ async function loadDay(ds){
 async function saveDay(ds){
   try{ await window.storage.set('checklist:'+ds, JSON.stringify(dayCache[ds]), false); }
   catch(e){ console.error('Erro ao salvar', e); }
+  // ── INTEGRAÇÃO PLANO 52 SEMANAS ──────────────────────────────
+  // O checklist do Plano de Limpeza é gravado aqui via window.storage (não no Firebase),
+  // então a sincronização precisa acontecer neste ponto — não dá para depender só do
+  // listener do Firebase (fbRoot), que nunca recebe essa gravação.
+  try{
+    if(typeof p52SyncDayFromChecklist === 'function'){
+      await p52SyncDayFromChecklist(ds, dayCache[ds]);
+      if(typeof section !== 'undefined' && section === 'p52sem' && typeof p52RenderCurrent === 'function'){
+        p52RenderCurrent();
+      }
+    }
+  }catch(e){ console.error('[Plano52] falha ao sincronizar com o Plano de Limpeza:', e); }
 }
 function resolveFreq(loc, turnKey, date){
   // Sempre usa a data explicitamente passada (lida do seletor de data do formulário).
@@ -443,6 +461,28 @@ function resolveFreq(loc, turnKey, date){
   return typeof raw === 'number' ? raw : 0;
 }
 function stateSymbol(s){ if(s==='done') return '✓'; if(s==='bad') return '✕'; return ''; }
+
+// Confirmação simples "Sim/Não", reutilizável — usada para desmarcar uma execução indevida
+// sem precisar passar pelo fluxo completo (executante + conferência do Plano 52).
+function showConfirmDialog(titulo, mensagem, onConfirm){
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;max-width:360px;width:100%;text-align:center;">
+    <div style="font-size:16px;font-weight:700;margin-bottom:8px;color:var(--text);">${titulo}</div>
+    <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px;">${mensagem}</div>
+    <div style="display:flex;gap:10px;">
+      <button id="confDlgNo" class="btn secondary" style="flex:1;">Não</button>
+      <button id="confDlgYes" class="btn" style="flex:1;">Sim</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#confDlgNo').addEventListener('click', ()=>overlay.remove());
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#confDlgYes').addEventListener('click', async ()=>{
+    overlay.remove();
+    await onConfirm();
+  });
+}
 // Alterna o estado do quadrado a cada clique: pendente -> feito -> problema -> pendente
 function cycleState(s){
   if(s==='pending') return 'done';
@@ -617,10 +657,10 @@ function getEntry(data,k){
 function renderTopControls(){
   const tc = document.getElementById('topControls');
   // Mark correct nav button active
-  ['navChecklist','navRequests','navReport','navUsers','navEfetivo'].forEach(id=>{
+  ['navChecklist','navRequests','navReport','navUsers','navEfetivo','nav52'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.classList.remove('active');
   });
-  const activeNav={checklist:'navChecklist',requests:'navRequests',report:'navReport',users:'navUsers',efetivo:'navEfetivo'}[section];
+  const activeNav={checklist:'navChecklist',requests:'navRequests',report:'navReport',users:'navUsers',efetivo:'navEfetivo',p52sem:'nav52'}[section];
   if(activeNav && document.getElementById(activeNav)) document.getElementById(activeNav).classList.add('active');
   updateNavAdminVisibility();
 
@@ -1036,12 +1076,33 @@ async function renderDay(){
       }
       const k = el.getAttribute('data-key');
       const cur = getEntry(data,k).state;
-      const next = cycleState(cur);
-      if(next==='pending'){
-        delete data[k];
-        await saveDay(ds);
-        renderDay();
-      } else {
+
+      if(cur === 'done' || cur === 'bad'){
+        // Já estava marcado (feito ou problema) — um novo clique aqui é para DESFAZER uma
+        // marcação indevida, não para marcar de novo. Confirmação simples, sem pedir
+        // executante nem reabrir a conferência do Plano 52.
+        const entryAtual = getEntry(data,k);
+        showConfirmDialog('Desmarcar atividade?', 'Essa marcação será removida do Plano de Limpeza.', async ()=>{
+          delete data[k];
+          await saveDay(ds);
+          renderDay();
+          // Desfaz também, no Plano 52 Semanas, apenas os status gravados por ESSA marcação
+          // específica (mesmo horário de registro) — não mexe em nada ajustado manualmente
+          // nem em outras execuções.
+          try{
+            const kParts = k.split('|');
+            await p52UndoFromChecklist(kParts[0], kParts[1], currentDate, entryAtual);
+          }catch(err){
+            console.error('Plano52: erro ao desfazer status vinculado (não bloqueia o Plano de Limpeza).', err);
+          }
+        });
+        return;
+      }
+
+      // Estava pendente (vazio) — fluxo completo de marcação: pede o executante e abre a
+      // conferência das atividades previstas no Plano 52 Semanas antes de confirmar.
+      const next = 'done';
+      {
         // Busca efetivo do turno/data atual
         const kParts = k.split('|');
         const kTurnKey = kParts[1]; // ex: T1D, T2D, T1N, T2N
@@ -1095,6 +1156,29 @@ async function renderDay(){
           if(!empName){ sel.style.borderColor='var(--bad)'; return; }
           overlay.remove();
           await saveEmployee(empName);
+
+          // ── INTEGRAÇÃO PLANO 52 SEMANAS ──────────────────────────────
+          // Se houver atividades do Plano52 vinculadas a este local/turno, abre o checklist
+          // e aguarda a confirmação do usuário antes de gravar. O checklist grava o detalhe
+          // granular (por atividade) E devolve true/false indicando se deve prosseguir.
+          // Se não houver atividades vinculadas (ou o módulo P52 não estiver carregado),
+          // comportamento é o mesmo de sempre: grava direto.
+          const kLocName = k.split('|')[0];
+          const kIdx = parseInt(k.split('|')[2]);
+          const kLoc = dayLocations.find(l=>l.name===kLocName);
+          const kDeadline = kLoc ? occDeadline(kLoc, kTurnKey, kIdx, currentDate) : null;
+          const kHorario = kDeadline ? fmtTime(kDeadline.getTime()) : '';
+          let proceed = true;
+          try{
+            if(typeof p52TryOpenChecklist === 'function'){
+              proceed = await p52TryOpenChecklist(kLocName, kTurnKey, currentDate, empName, kHorario);
+            }
+          }catch(err){
+            console.error('Plano52: erro ao abrir checklist, seguindo fluxo normal do Plano de Limpeza.', err);
+            proceed = true; // nunca bloqueia a confirmação do Plano de Limpeza por erro no módulo P52
+          }
+          if(proceed === false) return; // usuário cancelou no checklist — não altera o quadradinho
+
           data[k] = {state:next, ts:Date.now(), emp:empName};
           await saveDay(ds);
           renderDay();
@@ -2892,7 +2976,7 @@ async function ensureUserLogin(){
     const sess = await window.storage.get('userSession', false);
     if(sess){
       const u = JSON.parse(sess.value);
-      if(u.ts && (Date.now()-u.ts) < 12*60*60*1000){
+      if(u.ts && (Date.now()-u.ts) < 8*60*60*1000){  // sessão válida por 8h (1 turno), por dispositivo
         const found = users.find(x=>x.nome===u.nome && x.pin===u.pin);
         if(found){
           currentUser=found; currentEmployee=found.nome;
@@ -3311,7 +3395,42 @@ function kSwitchTab(tab){
 (async ()=>{
   const urlParams = new URLSearchParams(window.location.search);
   const isKioskFast = urlParams.get('tab')==='requests'||urlParams.get('kiosk')==='1';
-  
+
+  // Pré-carrega os dados do Plano 52 Semanas em paralelo, sem bloquear o carregamento do resto.
+  // Isso garante que o checklist de atividades esteja disponível assim que o usuário
+  // clicar em uma ocorrência, mesmo que ele nunca tenha aberto a aba "📅 Plano 52 Sem." antes.
+  (async ()=>{
+    try{
+      p52Meta = await p52LoadMeta();
+      p52Atividades = await p52LoadAtividades();
+      // Semeia automaticamente com os dados da planilha MG02 na primeira vez que o sistema
+      // roda nesta base (ou se a versão do preload mudou), para que a aba "Plano 52 Sem."
+      // já apareça preenchida sem precisar de importação manual do Excel.
+      if(!p52Meta || p52Meta.preloadVersion !== P52_PRELOAD_VERSION || !p52Atividades.length){
+        p52Atividades = P52_PRELOAD_ATIVIDADES;
+        await p52SaveAtividades(p52Atividades);
+        p52Meta = {
+          importedAt: new Date().toISOString(),
+          totalAtv: p52Atividades.length,
+          version: 1,
+          preloadVersion: P52_PRELOAD_VERSION,
+          origem: 'MG02_de_Plan_52_SEMANAS_Atualizado.xlsx'
+        };
+        await p52SaveMeta(p52Meta);
+        console.log('[Plano52] semeado automaticamente a partir do preload MG02:', p52Atividades.length, 'atividades');
+      }
+      console.log('[Plano52] pré-carregado:', p52Atividades.length, 'atividades');
+
+      // Backfill: sincroniza execuções do Plano de Limpeza que já existiam ANTES desta
+      // correção (o checklist é gravado só via window.storage, não no Firebase — por isso
+      // a sincronização em tempo real não pegava essas execuções passadas). Sem isso, dias
+      // com execução real no Plano de Limpeza ficariam sem preenchimento no Plano 52.
+      await p52BackfillFromChecklist();
+    }catch(e){
+      console.error('[Plano52] falha no pré-carregamento (não bloqueia o sistema):', e);
+    }
+  })();
+
   // Modo kiosk (mobile): carrega apenas o necessário — ignora sessão admin
   if(isKioskFast){
     document.body.classList.add('kiosk');
@@ -3757,6 +3876,1389 @@ document.getElementById('navEfetivo').addEventListener('click',()=>{
   renderTopControls();
   renderEfetivo();
 });
+
+
+// ============================================================
+// MÓDULO PLANO 52 SEMANAS
+// Inserido como adição ao sistema existente — não altera nada
+// ============================================================
+
+// ── CONSTANTES ──────────────────────────────────────────────
+
+// Alias simples: 1 nome do Excel → 1 nome oficial do Sistema.
+// 'Auditório' é tratado separadamente em P52_ALIAS_MULTI (vira 2 salas).
+const P52_ALIAS = {
+  'Melihelp':                           'Meli Help',
+  'Refeitório':                         'Meli Café',
+  'Copa ADM':                           'Meli Café',        // padronização: Copa ADM não existe mais como local — vira Meli Café no Plano52
+  'ADM':                                'Sala Staff',        // padronização: ADM (Plano52) → Sala Staff (mesmo nome do Sistema)
+  'Banheiro ADM':                       'Banheiro Staff',    // padronização: Banheiro ADM (Plano52) → Banheiro Staff (mesmo nome do Sistema)
+  'DML':                                'DMLs',
+  'Doca':                               'Docas Inbound',
+  'Ilha de ICQA':                       'ICQA',
+  'Descompressão':                      'Área de Descompressão', // consolidado: Sala/Área de Descompressão são o mesmo espaço
+  'Fundos Staff':                       'Setor ADM',
+  'Sala IS':                            'Sala TI',
+  'Vestiário':                          'Vestiário Masculino',
+  'Banheiros Inbound':                  'Banheiro Esfera 1 (Inbound) — Masculino',
+  'Banheiro Novo Outbound':             'Banheiro Novo Outbound',
+  'Sala Principal Staff':               'Sala Staff',
+  'Salas de Reunião':                   'Sala de Reunião',
+  'Recepção e Banheiro Recepção':       'Portaria',
+  'Ilha de Outbound':                   'Docas Outbound',
+  'Ilha de Inbound':                    'Docas Inbound',
+  'Buffers':                            null, // REMOVIDO — ignorar
+};
+
+// Alias 1→N: uma área do Excel corresponde a VÁRIOS locais do Sistema.
+// 'Auditório' foi dividido em 2 salas físicas reais — as atividades do Excel
+// se replicam para ambas (cada sala executa o checklist completo).
+const P52_ALIAS_MULTI = {
+  'Auditório': ['Sala Ladicá', 'Sala Ladilá'],
+};
+
+// Áreas criadas diretamente no sistema (não existem no Excel)
+// HS e HV NÃO são banheiro — são área operacional (varrer/lavar/lixo/guarda corpo)
+const P52_AREAS_EXTRA = [
+  { nome: 'Sorter',   tipo: 'operacional', atividades: [
+    {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+    {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+  ]},
+  { nome: 'Mezanino', tipo: 'operacional', atividades: [
+    {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+    {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+  ]},
+  { nome: 'HS', tipo: 'operacional', atividades: [
+    {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+    {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+  ]},
+  { nome: 'HV', tipo: 'operacional', atividades: [
+    {atv:'Varrer o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Lavar o piso', freq:'D', turno:'1T/2T'},
+    {atv:'Retirada dos lixos', freq:'D', turno:'1T/2T'},
+    {atv:'Limpeza guarda corpo', freq:'D', turno:'1T/2T'},
+  ]},
+];
+
+// ── DADOS PRÉ-CARREGADOS DO PLANO 52 SEMANAS (MG02) ──────────────
+// Gerados a partir de MG02_de_Plan_52_SEMANAS_Atualizado.xlsx (conciliado com LOCATIONS/
+// BATHROOM_LOCATIONS/P52_AREAS_EXTRA em 03/09/2026). Cada item já traz o nome de área
+// CANÔNICO do Sistema (aliases como 'Copa ADM'->'Meli Café' e 'Descompressão'->'Área de
+// Descompressão' já foram resolvidos aqui, para não depender do case-sensitive lookup em
+// P52_ALIAS em tempo de execução). `planning` é a lista de datas (YYYY-MM-DD) em que a
+// atividade está prevista, conforme o calendário da planilha (dados até 20/06/2026, mesmo
+// limite de preenchimento do restante da planilha original).
+const P52_PRELOAD_VERSION = 'MG02-2026-09-03-v2';
+const P52_PRELOAD_ATIVIDADES = [{"id":"área_de_descompressão__realizar_varrição","area":"Área de Descompressão","atividade":"Realizar varrição","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_de_divisórias","area":"Área de Descompressão","atividade":"Limpeza de divisórias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_superficial_do_bebedouro","area":"Área de Descompressão","atividade":"Limpeza superficial do bebedouro","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_dos_estofados","area":"Área de Descompressão","atividade":"Limpeza dos estofados","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__reposição_dos_copos","area":"Área de Descompressão","atividade":"Reposição dos copos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"area_de_descanso_out__realizar_varrição","area":"Area de descanso OUT","atividade":"Realizar varrição","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"area_de_descanso_out__limpeza_de_divisórias","area":"Area de descanso OUT","atividade":"Limpeza de divisórias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"area_de_descanso_out__limpeza_superficial_do_bebedouro","area":"Area de descanso OUT","atividade":"Limpeza superficial do bebedouro","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"area_de_descanso_out__limpeza_dos_estofados","area":"Area de descanso OUT","atividade":"Limpeza dos estofados","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"area_de_descanso_out__reposição_dos_copos","area":"Area de descanso OUT","atividade":"Reposição dos copos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_dos_fliperamas","area":"Área de Descompressão","atividade":"Limpeza dos fliperamas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_das_cadeiras","area":"Área de Descompressão","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_do_micro__HYP__ondas","area":"Área de Descompressão","atividade":"Limpeza do micro-ondas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_da_máquina_de_snacks","area":"Área de Descompressão","atividade":"Limpeza da máquina de snacks","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_da_escada","area":"Área de Descompressão","atividade":"Limpeza da escada","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_de_descompressão__limpeza_dos_vasos_com_vegetação","area":"Área de Descompressão","atividade":"Limpeza dos vasos com vegetação","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_da_pia","area":"Meli Café","atividade":"Limpeza da pia","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_do_refrigerador","area":"Meli Café","atividade":"Limpeza do refrigerador","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_das_mesas","area":"Meli Café","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_das_cadeiras","area":"Meli Café","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_da_máquina_de_café","area":"Meli Café","atividade":"Limpeza da máquina de café","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__limpeza_da_pia","area":"Refeitório de Terceiros","atividade":"Limpeza da pia","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__limpeza_de_micro__HYP__ondas","area":"Refeitório de Terceiros","atividade":"Limpeza de micro-ondas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__limpeza_de_refrigerador","area":"Refeitório de Terceiros","atividade":"Limpeza de refrigerador","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__varrição_e/ou_mopagem","area":"Refeitório de Terceiros","atividade":"Varrição e/ou mopagem","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__limpeza_das_mesas","area":"Refeitório de Terceiros","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__limpeza_das_cadeiras","area":"Refeitório de Terceiros","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_de_terceiros__limpeza_da_máquina_de_café","area":"Refeitório de Terceiros","atividade":"Limpeza da máquina de café","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ccm__limpeza_das_mesas","area":"CCM","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ccm__limpeza_das_cadeiras","area":"CCM","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ccm__limpeza_do_piso","area":"CCM","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ccm__passar_mop_no_piso","area":"CCM","atividade":"Passar mop no piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ccm__reposição_de_álcool_em_gel","area":"CCM","atividade":"Reposição de álcool em gel","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ccm__limpeza_dos_armários","area":"CCM","atividade":"Limpeza dos armários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_das_mesas","area":"Meli Café","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_das_cadeiras","area":"Meli Café","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__mop_no_piso","area":"Meli Café","atividade":"Mop no piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_no_piso","area":"Meli Café","atividade":"Limpeza no piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__recolhimento_de_resíduos","area":"Meli Café","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_café__limpeza_do_bebedouro","area":"Meli Café","atividade":"Limpeza do bebedouro","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__limpeza_dos_armários","area":"Vestiário Feminino","atividade":"Limpeza dos armários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__limpeza_do_piso","area":"Vestiário Feminino","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__lavagem_das_cabines_de_banho","area":"Vestiário Feminino","atividade":"Lavagem das cabines de banho","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__lavagem_dos_vasos_sanitários","area":"Vestiário Feminino","atividade":"Lavagem dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__limpeza_superficial_de_dispensers_de_papel_toalha","area":"Vestiário Feminino","atividade":"Limpeza superficial de dispensers de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__reposição_de_papel_higiênico","area":"Vestiário Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__reposição_de_sabão_líquido","area":"Vestiário Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_feminino__limpeza_dos_espelhos","area":"Vestiário Feminino","atividade":"Limpeza dos espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__limpeza_de_armários","area":"Vestiário Masculino","atividade":"Limpeza de armários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__limpeza_dos_mictórios","area":"Vestiário Masculino","atividade":"Limpeza dos mictórios","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__lavagem_das_cabines_de_banho","area":"Vestiário Masculino","atividade":"Lavagem das cabines de banho","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__lavagem_dos_vasos_sanitários","area":"Vestiário Masculino","atividade":"Lavagem dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__limpeza_superficial_de_dispensers_de_papel_toalha","area":"Vestiário Masculino","atividade":"Limpeza superficial de dispensers de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__reposição_de_papel_higiênico","area":"Vestiário Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__reposição_de_sabão_líquido","area":"Vestiário Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"vestiário_masculino__limpeza_dos_espelhos","area":"Vestiário Masculino","atividade":"Limpeza dos espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"dmls__reposição_dos_recipientes","area":"DMLs","atividade":"Reposição dos recipientes","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"dmls__lavagem_da_pia","area":"DMLs","atividade":"Lavagem da pia","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"dmls__limpeza_do_piso","area":"DMLs","atividade":"Limpeza do piso","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"dmls__lavagem_do_piso","area":"DMLs","atividade":"Lavagem do piso","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"dmls__organização_das_ferramentas_de_trabalho","area":"DMLs","atividade":"Organização das ferramentas de trabalho","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"dmls__limpeza_das_estantes","area":"DMLs","atividade":"Limpeza das estantes","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"portaria__limpeza_do_piso","area":"Portaria","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__lavagem_do_banheiro","area":"Portaria","atividade":"Lavagem do banheiro","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__reposição_de_papel_higiênico","area":"Portaria","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__limpeza_das_mesas","area":"Portaria","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__limpeza_das_cadeiras","area":"Portaria","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__limpeza_do_armário","area":"Portaria","atividade":"Limpeza do armário","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__limpeza_dos_vidros","area":"Portaria","atividade":"Limpeza dos vidros","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"portaria__passar_mop_no_piso","area":"Portaria","atividade":"Passar mop no piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_amamentação__limpeza_do_piso","area":"Sala de Amamentação","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_amamentação__limpeza_da_pia","area":"Sala de Amamentação","atividade":"Limpeza da pia","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_amamentação__limpeza_superficial_do_frigobar","area":"Sala de Amamentação","atividade":"Limpeza superficial do frigobar","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_amamentação__recolhimento_de_resíduos","area":"Sala de Amamentação","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_amamentação__limpeza_do_estofado","area":"Sala de Amamentação","atividade":"Limpeza do estofado","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__limpeza_do_piso","area":"Ambulatório","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__recolhimento_de_resíduos","area":"Ambulatório","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__limpeza_das_mesas","area":"Ambulatório","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__limpeza_das_cadeiras","area":"Ambulatório","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__reposição_de_papel_toalha","area":"Ambulatório","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__reposição_de_sabão_líquido","area":"Ambulatório","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__limpeza_superficial_de_bebedouro","area":"Ambulatório","atividade":"Limpeza superficial de bebedouro","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ambulatório__limpeza_das_macas","area":"Ambulatório","atividade":"Limpeza das macas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"oficina_de_manutenção__limpeza_do_piso","area":"Oficina de Manutenção","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"oficina_de_manutenção__lavagem_do_piso","area":"Oficina de Manutenção","atividade":"Lavagem do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"oficina_de_manutenção__limpeza_das_mesas","area":"Oficina de Manutenção","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"oficina_de_manutenção__limpeza_das_cadeiras","area":"Oficina de Manutenção","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"oficina_de_manutenção__recolhimento_de_resíduos","area":"Oficina de Manutenção","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__limpeza_do_pisos","area":"Banheiro Staff","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__limpeza_das_pias","area":"Banheiro Staff","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__limpeza_de_espelhos","area":"Banheiro Staff","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__limpeza_dos_vasos_sanitários","area":"Banheiro Staff","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__reposição_de_papel_toalha","area":"Banheiro Staff","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__reposição_de_papel_higiênico","area":"Banheiro Staff","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_staff__reposição_de_sabão_líquido","area":"Banheiro Staff","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__limpeza_das_mesas","area":"Setor ADM","atividade":"Limpeza das mesas","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__limpeza_das_cadeiras","area":"Setor ADM","atividade":"Limpeza das cadeiras","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__limpeza_dos_pisos","area":"Setor ADM","atividade":"Limpeza dos pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__limpeza_dos_estofados","area":"Setor ADM","atividade":"Limpeza dos estofados","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__varrição_e/ou_mopagem","area":"Setor ADM","atividade":"Varrição e/ou mopagem","freq":"SL","turno":"1T/2T","planning":["2026-01-28","2026-01-29","2026-01-30","2026-01-31","2026-01-01","2026-01-02","2026-01-03","2026-01-04","2026-01-05","2026-01-06","2026-01-07","2026-01-08","2026-01-09","2026-01-10","2026-01-11","2026-01-12","2026-01-13","2026-01-14","2026-01-15","2026-01-16","2026-01-17","2026-01-18","2026-01-19","2026-01-20","2026-01-21","2026-01-22","2026-01-23","2026-01-24","2026-01-25","2026-01-26","2026-01-27","2026-01-28","2026-01-29","2026-01-30","2026-02-01","2026-02-02","2026-02-03","2026-02-04","2026-02-05","2026-02-06","2026-02-07","2026-02-08","2026-02-09","2026-02-10","2026-02-11","2026-02-12","2026-02-13","2026-02-14","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-02-24","2026-02-25","2026-02-26","2026-02-27","2026-03-28","2026-03-01","2026-03-02","2026-03-03","2026-03-04","2026-03-05","2026-03-06","2026-03-07","2026-03-08","2026-03-09","2026-03-10","2026-03-11","2026-03-12","2026-03-13","2026-03-14","2026-03-15","2026-03-16","2026-03-17","2026-03-18","2026-03-19","2026-03-20","2026-03-21","2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29","2026-03-30","2026-04-01","2026-04-02","2026-04-03","2026-04-04","2026-04-05","2026-04-06","2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-11","2026-04-12","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-18","2026-04-19","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-25","2026-04-26","2026-04-27","2026-04-28","2026-04-29","2026-05-30","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-05-07","2026-05-08","2026-05-09","2026-05-10","2026-05-11","2026-05-12","2026-05-13","2026-05-14","2026-05-15","2026-05-16","2026-05-17","2026-05-18","2026-05-19","2026-05-20","2026-05-21","2026-05-22","2026-05-23","2026-05-24","2026-05-25","2026-05-26","2026-05-27","2026-05-28","2026-05-29","2026-06-30","2026-06-01","2026-06-02","2026-06-03","2026-06-04","2026-06-05","2026-06-06","2026-06-07","2026-06-08","2026-06-09","2026-06-10","2026-06-11","2026-06-12","2026-06-13","2026-06-14","2026-06-15","2026-06-16","2026-06-17","2026-06-18","2026-06-19","2026-06-20"],"fonte":"excel"},{"id":"setor_adm__recolhimento_de_resíduos","area":"Setor ADM","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__limpeza_das_cabines_de_feedback","area":"Setor ADM","atividade":"Limpeza das cabines de feedback","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_adm__limpeza_dos_vidros","area":"Setor ADM","atividade":"Limpeza dos vidros","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ilha_ecológica__limpeza_do_piso","area":"Ilha Ecológica","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ilha_ecológica__varrição_e/ou_mopagem","area":"Ilha Ecológica","atividade":"Varrição e/ou mopagem","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ilha_ecológica__lavagem_do_piso","area":"Ilha Ecológica","atividade":"Lavagem do piso","freq":"SL","turno":"1T/2T","planning":["2026-01-28","2026-01-29","2026-01-30","2026-01-31","2026-01-01","2026-01-02","2026-01-03","2026-01-04","2026-01-05","2026-01-06","2026-01-07","2026-01-08","2026-01-09","2026-01-10","2026-01-11","2026-01-12","2026-01-13","2026-01-14","2026-01-15","2026-01-16","2026-01-17","2026-01-18","2026-01-19","2026-01-20","2026-01-21","2026-01-22","2026-01-23","2026-01-24","2026-01-25","2026-01-26","2026-01-27","2026-01-28","2026-01-29","2026-01-30","2026-02-01","2026-02-02","2026-02-03","2026-02-04","2026-02-05","2026-02-06","2026-02-07","2026-02-08","2026-02-09","2026-02-10","2026-02-11","2026-02-12","2026-02-13","2026-02-14","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-02-24","2026-02-25","2026-02-26","2026-02-27","2026-03-28","2026-03-01","2026-03-02","2026-03-03","2026-03-04","2026-03-05","2026-03-06","2026-03-07","2026-03-08","2026-03-09","2026-03-10","2026-03-11","2026-03-12","2026-03-13","2026-03-14","2026-03-15","2026-03-16","2026-03-17","2026-03-18","2026-03-19","2026-03-20","2026-03-21","2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29","2026-03-30","2026-04-01","2026-04-02","2026-04-03","2026-04-04","2026-04-05","2026-04-06","2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-11","2026-04-12","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-18","2026-04-19","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-25","2026-04-26","2026-04-27","2026-04-28","2026-04-29","2026-05-30","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-05-07","2026-05-08","2026-05-09","2026-05-10","2026-05-11","2026-05-12","2026-05-13","2026-05-14","2026-05-15","2026-05-16","2026-05-17","2026-05-18","2026-05-19","2026-05-20","2026-05-21","2026-05-22","2026-05-23","2026-05-24","2026-05-25","2026-05-26","2026-05-27","2026-05-28","2026-05-29","2026-06-30","2026-06-01","2026-06-02","2026-06-03","2026-06-04","2026-06-05","2026-06-06","2026-06-07","2026-06-08","2026-06-09","2026-06-10","2026-06-11","2026-06-12","2026-06-13","2026-06-14","2026-06-15","2026-06-16","2026-06-17","2026-06-18","2026-06-19","2026-06-20"],"fonte":"excel"},{"id":"ilha_ecológica__recolhimento_de_resíduos","area":"Ilha Ecológica","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ilha_ecológica__limpeza_do_piso","area":"Ilha Ecológica","atividade":"Limpeza do piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ilha_ecológica__varrição_e/ou_mopagem","area":"Ilha Ecológica","atividade":"Varrição e/ou mopagem","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"ilha_ecológica__lavagem_do_piso","area":"Ilha Ecológica","atividade":"Lavagem do piso","freq":"SL","turno":"1T/2T","planning":["2026-01-28","2026-01-29","2026-01-30","2026-01-31","2026-01-01","2026-01-02","2026-01-03","2026-01-04","2026-01-05","2026-01-06","2026-01-07","2026-01-08","2026-01-09","2026-01-10","2026-01-11","2026-01-12","2026-01-13","2026-01-14","2026-01-15","2026-01-16","2026-01-17","2026-01-18","2026-01-19","2026-01-20","2026-01-21","2026-01-22","2026-01-23","2026-01-24","2026-01-25","2026-01-26","2026-01-27","2026-01-28","2026-01-29","2026-01-30","2026-02-01","2026-02-02","2026-02-03","2026-02-04","2026-02-05","2026-02-06","2026-02-07","2026-02-08","2026-02-09","2026-02-10","2026-02-11","2026-02-12","2026-02-13","2026-02-14","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-02-24","2026-02-25","2026-02-26","2026-02-27","2026-03-28","2026-03-01","2026-03-02","2026-03-03","2026-03-04","2026-03-05","2026-03-06","2026-03-07","2026-03-08","2026-03-09","2026-03-10","2026-03-11","2026-03-12","2026-03-13","2026-03-14","2026-03-15","2026-03-16","2026-03-17","2026-03-18","2026-03-19","2026-03-20","2026-03-21","2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29","2026-03-30","2026-04-01","2026-04-02","2026-04-03","2026-04-04","2026-04-05","2026-04-06","2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-11","2026-04-12","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-18","2026-04-19","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-25","2026-04-26","2026-04-27","2026-04-28","2026-04-29","2026-05-30","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-05-07","2026-05-08","2026-05-09","2026-05-10","2026-05-11","2026-05-12","2026-05-13","2026-05-14","2026-05-15","2026-05-16","2026-05-17","2026-05-18","2026-05-19","2026-05-20","2026-05-21","2026-05-22","2026-05-23","2026-05-24","2026-05-25","2026-05-26","2026-05-27","2026-05-28","2026-05-29","2026-06-30","2026-06-01","2026-06-02","2026-06-03","2026-06-04","2026-06-05","2026-06-06","2026-06-07","2026-06-08","2026-06-09","2026-06-10","2026-06-11","2026-06-12","2026-06-13","2026-06-14","2026-06-15","2026-06-16","2026-06-17","2026-06-18","2026-06-19","2026-06-20"],"fonte":"excel"},{"id":"ilha_ecológica__recolhimento_de_resíduos","area":"Ilha Ecológica","atividade":"Recolhimento de resíduos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__limpeza_das_pias","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Ilha 2 (Inbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__limpeza_das_pias","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Ilha 2 (Inbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__limpeza_das_pias","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(inbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Ilha 2 (Inbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__limpeza_das_pias","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Esfera 3 (Inbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__limpeza_das_pias","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Esfera 3 (Inbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__limpeza_das_pias","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(inbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Esfera 3 (Inbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__limpeza_das_pias","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Esfera 2 (Inbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__limpeza_das_pias","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Esfera 2 (Inbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__limpeza_das_pias","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(inbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Esfera 2 (Inbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__limpeza_das_pias","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Esfera 1 (Inbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__limpeza_das_pias","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Esfera 1 (Inbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__limpeza_das_pias","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(inbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Esfera 1 (Inbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__limpeza_das_pias","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Ilha 1 (Inbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__limpeza_das_pias","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Ilha 1 (Inbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__limpeza_das_pias","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(inbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Ilha 1 (Inbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__limpeza_das_pias","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Ilha 2 (Outbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__limpeza_das_pias","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Ilha 2 (Outbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__limpeza_das_pias","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_2_(outbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Ilha 2 (Outbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__limpeza_das_pias","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Esfera 3 (Outbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__limpeza_das_pias","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Esfera 3 (Outbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__limpeza_das_pias","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_3_(outbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Esfera 3 (Outbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__limpeza_das_pias","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Esfera 2 (Outbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__limpeza_das_pias","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Esfera 2 (Outbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__limpeza_das_pias","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_2_(outbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Esfera 2 (Outbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__limpeza_das_pias","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Esfera 1 (Outbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__limpeza_das_pias","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Esfera 1 (Outbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__limpeza_das_pias","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_esfera_1_(outbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Esfera 1 (Outbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__limpeza_do_pisos","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__limpeza_das_pias","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__limpeza_de_espelhos","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__reposição_de_papel_toalha","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__reposição_de_papel_higiênico","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_pcd__reposição_de_sabão_líquido","area":"Banheiro Ilha 1 (Outbound) — PCD","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__limpeza_do_pisos","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__limpeza_das_pias","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__limpeza_de_espelhos","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__reposição_de_papel_toalha","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Ilha 1 (Outbound) — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__limpeza_do_pisos","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__limpeza_das_pias","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__limpeza_de_espelhos","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__reposição_de_papel_toalha","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ilha_1_(outbound)_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Ilha 1 (Outbound) — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__limpeza_do_pisos","area":"Banheiro Descompressão — Masculino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__limpeza_das_pias","area":"Banheiro Descompressão — Masculino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__limpeza_de_espelhos","area":"Banheiro Descompressão — Masculino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__limpeza_dos_vasos_sanitários","area":"Banheiro Descompressão — Masculino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__reposição_de_papel_toalha","area":"Banheiro Descompressão — Masculino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__reposição_de_papel_higiênico","area":"Banheiro Descompressão — Masculino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__reposição_de_absorvente_higiênico","area":"Banheiro Descompressão — Masculino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_masculino__reposição_de_sabão_líquido","area":"Banheiro Descompressão — Masculino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__limpeza_do_pisos","area":"Banheiro Descompressão — Feminino","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__limpeza_das_pias","area":"Banheiro Descompressão — Feminino","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__limpeza_de_espelhos","area":"Banheiro Descompressão — Feminino","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__limpeza_dos_vasos_sanitários","area":"Banheiro Descompressão — Feminino","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__reposição_de_papel_toalha","area":"Banheiro Descompressão — Feminino","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__reposição_de_papel_higiênico","area":"Banheiro Descompressão — Feminino","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__reposição_de_absorvente_higiênico","area":"Banheiro Descompressão — Feminino","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_descompressão_—_feminino__reposição_de_sabão_líquido","area":"Banheiro Descompressão — Feminino","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__limpeza_do_pisos","area":"Banheiro Ambulatório","atividade":"Limpeza do pisos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__limpeza_das_pias","area":"Banheiro Ambulatório","atividade":"Limpeza das pias","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__limpeza_de_espelhos","area":"Banheiro Ambulatório","atividade":"Limpeza de espelhos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__limpeza_dos_vasos_sanitários","area":"Banheiro Ambulatório","atividade":"Limpeza dos vasos sanitários","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__reposição_de_papel_toalha","area":"Banheiro Ambulatório","atividade":"Reposição de papel toalha","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__reposição_de_papel_higiênico","area":"Banheiro Ambulatório","atividade":"Reposição de papel higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__reposição_de_absorvente_higiênico","area":"Banheiro Ambulatório","atividade":"Reposição de absorvente higiênico","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"banheiro_ambulatório__reposição_de_sabão_líquido","area":"Banheiro Ambulatório","atividade":"Reposição de sabão líquido","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_sorter__varrer_o_piso","area":"Área Sorter","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_sorter__lavar_o_piso","area":"Área Sorter","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_sorter__retirada_dos_lixos","area":"Área Sorter","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"área_sorter__limpeza_guarda_corpo","area":"Área Sorter","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_0__varrer_o_piso","area":"Mezanino Piso 0","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_0__lavar_o_piso","area":"Mezanino Piso 0","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_0__retirada_dos_lixos","area":"Mezanino Piso 0","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_0__limpeza_guarda_corpo","area":"Mezanino Piso 0","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_1__varrer_o_piso","area":"Mezanino Piso 1","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_1__lavar_o_piso","area":"Mezanino Piso 1","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_1__retirada_dos_lixos","area":"Mezanino Piso 1","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_1__limpeza_guarda_corpo","area":"Mezanino Piso 1","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_2__varrer_o_piso","area":"Mezanino Piso 2","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_2__lavar_o_piso","area":"Mezanino Piso 2","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_2__retirada_dos_lixos","area":"Mezanino Piso 2","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_2__limpeza_guarda_corpo","area":"Mezanino Piso 2","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_3__varrer_o_piso","area":"Mezanino Piso 3","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_3__lavar_o_piso","area":"Mezanino Piso 3","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_3__retirada_dos_lixos","area":"Mezanino Piso 3","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"mezanino_piso_3__limpeza_guarda_corpo","area":"Mezanino Piso 3","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hs__varrer_o_piso","area":"HS","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hs__lavar_o_piso","area":"HS","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hs__retirada_dos_lixos","area":"HS","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hs__limpeza_guarda_corpo","area":"HS","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hv__varrer_o_piso","area":"HV","atividade":"Varrer o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hv__lavar_o_piso","area":"HV","atividade":"Lavar o piso","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hv__retirada_dos_lixos","area":"HV","atividade":"Retirada dos lixos","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"hv__limpeza_guarda_corpo","area":"HV","atividade":"Limpeza guarda corpo","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"almoxarifado__limpeza_geral_do_ambiente","area":"Almoxarifado","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"apoio_ao_motorista_externo__limpeza_geral_do_ambiente","area":"Apoio ao Motorista Externo","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"apoio_ao_motorista_lado_in__limpeza_geral_do_ambiente","area":"Apoio ao Motorista lado IN","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"apoio_ao_motorista_lado_out__limpeza_geral_do_ambiente","area":"Apoio ao Motorista lado OUT","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"depósito_epi__limpeza_geral_do_ambiente","area":"Depósito EPI","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"depósito_is__limpeza_geral_do_ambiente","area":"Depósito IS","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"docas_inbound__limpeza_geral_do_ambiente","area":"Docas Inbound","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"docas_outbound__limpeza_geral_do_ambiente","area":"Docas Outbound","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"esferas_inbound__limpeza_geral_do_ambiente","area":"Esferas Inbound","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"esferas_outbound__limpeza_geral_do_ambiente","area":"Esferas Outbound","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"icqa__limpeza_geral_do_ambiente","area":"ICQA","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"meli_help__limpeza_geral_do_ambiente","area":"Meli Help","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"rk__limpeza_geral_do_ambiente","area":"RK","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"refeitório_meli__limpeza_geral_do_ambiente","area":"Refeitório Meli","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_ladicá__limpeza_geral_do_ambiente","area":"Sala Ladicá","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_ladilá__limpeza_geral_do_ambiente","area":"Sala Ladilá","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_log__limpeza_geral_do_ambiente","area":"Sala Log","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_loss__limpeza_geral_do_ambiente","area":"Sala Loss","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_portal__limpeza_geral_do_ambiente","area":"Sala Portal","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_staff__limpeza_geral_do_ambiente","area":"Sala Staff","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_ti__limpeza_geral_do_ambiente","area":"Sala TI","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_apoio_qg__limpeza_geral_do_ambiente","area":"Sala de Apoio QG","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_monitoramento__limpeza_geral_do_ambiente","area":"Sala de Monitoramento","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_plant__limpeza_geral_do_ambiente","area":"Sala de Plant","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_de_reunião__limpeza_geral_do_ambiente","area":"Sala de Reunião","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"sala_área_gate__limpeza_geral_do_ambiente","area":"Sala Área Gate","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"salão__limpeza_geral_do_ambiente","area":"Salão","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"setor_segurança__limpeza_geral_do_ambiente","area":"Setor Segurança","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"áreas_de_circulação_in__limpeza_geral_do_ambiente","area":"Áreas de Circulação IN","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"áreas_de_circulação_out__limpeza_geral_do_ambiente","area":"Áreas de Circulação OUT","atividade":"Limpeza geral do ambiente","freq":"D","turno":"1T/2T","planning":[],"fonte":"excel"},{"id":"esteiras_da_operação__limpeza_geral_do_ambiente","area":"Esteiras da Operação","atividade":"Limpeza geral do ambiente","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-06","2026-01-09","2026-01-13","2026-01-16","2026-01-20","2026-01-23","2026-01-27","2026-01-30","2026-02-03","2026-02-06","2026-02-10","2026-02-13","2026-02-17","2026-02-20","2026-02-24","2026-02-27","2026-03-03","2026-03-06","2026-03-10","2026-03-13","2026-03-17","2026-03-20","2026-03-24","2026-03-27","2026-03-31","2026-04-03","2026-04-07","2026-04-10","2026-04-14","2026-04-17","2026-04-21","2026-04-24","2026-04-28","2026-05-01","2026-05-05","2026-05-08","2026-05-12","2026-05-15","2026-05-19","2026-05-22","2026-05-26","2026-05-29","2026-06-02","2026-06-05","2026-06-09","2026-06-12","2026-06-16","2026-06-19","2026-06-23","2026-06-26","2026-06-30","2026-07-03","2026-07-07","2026-07-10","2026-07-14","2026-07-17","2026-07-21","2026-07-24","2026-07-28","2026-07-31","2026-08-04","2026-08-07","2026-08-11","2026-08-14","2026-08-18","2026-08-21","2026-08-25","2026-08-28","2026-09-01","2026-09-04","2026-09-08","2026-09-11","2026-09-15","2026-09-18","2026-09-22","2026-09-25","2026-09-29","2026-10-02","2026-10-06","2026-10-09","2026-10-13","2026-10-16","2026-10-20","2026-10-23","2026-10-27","2026-10-30","2026-11-03","2026-11-06","2026-11-10","2026-11-13","2026-11-17","2026-11-20","2026-11-24","2026-11-27","2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"],"fonte":"excel"},{"id":"geladeira_—_meli_café__limpeza_geral_do_ambiente","area":"Geladeira — Meli Café","atividade":"Limpeza geral do ambiente","freq":"S","turno":"1T/2T","planning":["2026-01-04","2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08","2026-02-15","2026-02-22","2026-03-01","2026-03-08","2026-03-15","2026-03-22","2026-03-29","2026-04-05","2026-04-12","2026-04-19","2026-04-26","2026-05-03","2026-05-10","2026-05-17","2026-05-24","2026-05-31","2026-06-07","2026-06-14","2026-06-21","2026-06-28","2026-07-05","2026-07-12","2026-07-19","2026-07-26","2026-08-02","2026-08-09","2026-08-16","2026-08-23","2026-08-30","2026-09-06","2026-09-13","2026-09-20","2026-09-27","2026-10-04","2026-10-11","2026-10-18","2026-10-25","2026-11-01","2026-11-08","2026-11-15","2026-11-22","2026-11-29","2026-12-06","2026-12-13","2026-12-20","2026-12-27"],"fonte":"excel"},{"id":"geladeira_—_staff__limpeza_geral_do_ambiente","area":"Geladeira — Staff","atividade":"Limpeza geral do ambiente","freq":"S","turno":"1T/2T","planning":["2026-01-04","2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08","2026-02-15","2026-02-22","2026-03-01","2026-03-08","2026-03-15","2026-03-22","2026-03-29","2026-04-05","2026-04-12","2026-04-19","2026-04-26","2026-05-03","2026-05-10","2026-05-17","2026-05-24","2026-05-31","2026-06-07","2026-06-14","2026-06-21","2026-06-28","2026-07-05","2026-07-12","2026-07-19","2026-07-26","2026-08-02","2026-08-09","2026-08-16","2026-08-23","2026-08-30","2026-09-06","2026-09-13","2026-09-20","2026-09-27","2026-10-04","2026-10-11","2026-10-18","2026-10-25","2026-11-01","2026-11-08","2026-11-15","2026-11-22","2026-11-29","2026-12-06","2026-12-13","2026-12-20","2026-12-27"],"fonte":"excel"},{"id":"geladeira_—_refeitório_terceiros__limpeza_geral_do_ambiente","area":"Geladeira — Refeitório Terceiros","atividade":"Limpeza geral do ambiente","freq":"S","turno":"1T/2T","planning":["2026-01-04","2026-01-11","2026-01-18","2026-01-25","2026-02-01","2026-02-08","2026-02-15","2026-02-22","2026-03-01","2026-03-08","2026-03-15","2026-03-22","2026-03-29","2026-04-05","2026-04-12","2026-04-19","2026-04-26","2026-05-03","2026-05-10","2026-05-17","2026-05-24","2026-05-31","2026-06-07","2026-06-14","2026-06-21","2026-06-28","2026-07-05","2026-07-12","2026-07-19","2026-07-26","2026-08-02","2026-08-09","2026-08-16","2026-08-23","2026-08-30","2026-09-06","2026-09-13","2026-09-20","2026-09-27","2026-10-04","2026-10-11","2026-10-18","2026-10-25","2026-11-01","2026-11-08","2026-11-15","2026-11-22","2026-11-29","2026-12-06","2026-12-13","2026-12-20","2026-12-27"],"fonte":"excel"},{"id":"área_externa__limpeza_geral_do_ambiente","area":"Área Externa","atividade":"Limpeza geral do ambiente","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-05","2026-01-07","2026-01-09","2026-01-12","2026-01-14","2026-01-16","2026-01-19","2026-01-21","2026-01-23","2026-01-26","2026-01-28","2026-01-30","2026-02-02","2026-02-04","2026-02-06","2026-02-09","2026-02-11","2026-02-13","2026-02-16","2026-02-18","2026-02-20","2026-02-23","2026-02-25","2026-02-27","2026-03-02","2026-03-04","2026-03-06","2026-03-09","2026-03-11","2026-03-13","2026-03-16","2026-03-18","2026-03-20","2026-03-23","2026-03-25","2026-03-27","2026-03-30","2026-04-01","2026-04-03","2026-04-06","2026-04-08","2026-04-10","2026-04-13","2026-04-15","2026-04-17","2026-04-20","2026-04-22","2026-04-24","2026-04-27","2026-04-29","2026-05-01","2026-05-04","2026-05-06","2026-05-08","2026-05-11","2026-05-13","2026-05-15","2026-05-18","2026-05-20","2026-05-22","2026-05-25","2026-05-27","2026-05-29","2026-06-01","2026-06-03","2026-06-05","2026-06-08","2026-06-10","2026-06-12","2026-06-15","2026-06-17","2026-06-19","2026-06-22","2026-06-24","2026-06-26","2026-06-29","2026-07-01","2026-07-03","2026-07-06","2026-07-08","2026-07-10","2026-07-13","2026-07-15","2026-07-17","2026-07-20","2026-07-22","2026-07-24","2026-07-27","2026-07-29","2026-07-31","2026-08-03","2026-08-05","2026-08-07","2026-08-10","2026-08-12","2026-08-14","2026-08-17","2026-08-19","2026-08-21","2026-08-24","2026-08-26","2026-08-28","2026-08-31","2026-09-02","2026-09-04","2026-09-07","2026-09-09","2026-09-11","2026-09-14","2026-09-16","2026-09-18","2026-09-21","2026-09-23","2026-09-25","2026-09-28","2026-09-30","2026-10-02","2026-10-05","2026-10-07","2026-10-09","2026-10-12","2026-10-14","2026-10-16","2026-10-19","2026-10-21","2026-10-23","2026-10-26","2026-10-28","2026-10-30","2026-11-02","2026-11-04","2026-11-06","2026-11-09","2026-11-11","2026-11-13","2026-11-16","2026-11-18","2026-11-20","2026-11-23","2026-11-25","2026-11-27","2026-11-30","2026-12-02","2026-12-04","2026-12-07","2026-12-09","2026-12-11","2026-12-14","2026-12-16","2026-12-18","2026-12-21","2026-12-23","2026-12-25","2026-12-28","2026-12-30"],"fonte":"excel"},{"id":"áreas_de_circulação_externa__limpeza_geral_do_ambiente","area":"Áreas de Circulação Externa","atividade":"Limpeza geral do ambiente","freq":"S","turno":"1T/2T","planning":["2026-01-02","2026-01-05","2026-01-07","2026-01-09","2026-01-12","2026-01-14","2026-01-16","2026-01-19","2026-01-21","2026-01-23","2026-01-26","2026-01-28","2026-01-30","2026-02-02","2026-02-04","2026-02-06","2026-02-09","2026-02-11","2026-02-13","2026-02-16","2026-02-18","2026-02-20","2026-02-23","2026-02-25","2026-02-27","2026-03-02","2026-03-04","2026-03-06","2026-03-09","2026-03-11","2026-03-13","2026-03-16","2026-03-18","2026-03-20","2026-03-23","2026-03-25","2026-03-27","2026-03-30","2026-04-01","2026-04-03","2026-04-06","2026-04-08","2026-04-10","2026-04-13","2026-04-15","2026-04-17","2026-04-20","2026-04-22","2026-04-24","2026-04-27","2026-04-29","2026-05-01","2026-05-04","2026-05-06","2026-05-08","2026-05-11","2026-05-13","2026-05-15","2026-05-18","2026-05-20","2026-05-22","2026-05-25","2026-05-27","2026-05-29","2026-06-01","2026-06-03","2026-06-05","2026-06-08","2026-06-10","2026-06-12","2026-06-15","2026-06-17","2026-06-19","2026-06-22","2026-06-24","2026-06-26","2026-06-29","2026-07-01","2026-07-03","2026-07-06","2026-07-08","2026-07-10","2026-07-13","2026-07-15","2026-07-17","2026-07-20","2026-07-22","2026-07-24","2026-07-27","2026-07-29","2026-07-31","2026-08-03","2026-08-05","2026-08-07","2026-08-10","2026-08-12","2026-08-14","2026-08-17","2026-08-19","2026-08-21","2026-08-24","2026-08-26","2026-08-28","2026-08-31","2026-09-02","2026-09-04","2026-09-07","2026-09-09","2026-09-11","2026-09-14","2026-09-16","2026-09-18","2026-09-21","2026-09-23","2026-09-25","2026-09-28","2026-09-30","2026-10-02","2026-10-05","2026-10-07","2026-10-09","2026-10-12","2026-10-14","2026-10-16","2026-10-19","2026-10-21","2026-10-23","2026-10-26","2026-10-28","2026-10-30","2026-11-02","2026-11-04","2026-11-06","2026-11-09","2026-11-11","2026-11-13","2026-11-16","2026-11-18","2026-11-20","2026-11-23","2026-11-25","2026-11-27","2026-11-30","2026-12-02","2026-12-04","2026-12-07","2026-12-09","2026-12-11","2026-12-14","2026-12-16","2026-12-18","2026-12-21","2026-12-23","2026-12-25","2026-12-28","2026-12-30"],"fonte":"excel"}];
+
+const fb52 = () => fbRoot.child('plano52');
+
+// ── ESTADO LOCAL ──────────────────────────────────────────────
+let p52Atividades = [];
+let p52StatusCache = {};
+let p52Meta = null;
+let p52View = 'semana';
+let p52WeekOffset = 0;
+let p52MonthOffset = 0;
+let p52Filters = {area:'', turno:'', status:'', freq:''};
+let p52FirebaseListener = null;
+
+// ── HELPERS ──────────────────────────────────────────────────
+
+function p52Today(){ return nowBRT(); }
+function p52DateStr(d){ return dateStr(d); }
+
+function p52GetWeekDates(offset){
+  const today = p52Today();
+  const dow = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow===0 ? 6 : dow-1) + offset*7);
+  monday.setHours(0,0,0,0);
+  const days = [];
+  for(let i=0;i<7;i++){
+    const d = new Date(monday);
+    d.setDate(monday.getDate()+i);
+    days.push(d);
+  }
+  return days;
+}
+
+function p52WeekNum(d){
+  const jan1 = new Date(d.getFullYear(),0,1);
+  return Math.ceil(((d-jan1)/86400000 + jan1.getDay()+1)/7);
+}
+
+const P52_MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const P52_DIAS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+function p52MonthDate(offset){
+  const t = p52Today();
+  return new Date(t.getFullYear(), t.getMonth()+offset, 1);
+}
+
+function p52AtvId(area, atv){
+  return encodeKey((area+'__'+atv).toLowerCase().replace(/\s+/g,'_').substring(0,80));
+}
+
+// ── PERSISTÊNCIA ───────────────────────────────
+
+async function p52LoadMeta(){
+  try{ const s = await window.storage.get('p52:meta', true); return s ? JSON.parse(s.value) : null; }catch(e){ return null; }
+}
+async function p52SaveMeta(meta){
+  try{ await window.storage.set('p52:meta', JSON.stringify(meta), true); }catch(e){}
+}
+async function p52LoadAtividades(){
+  try{ const s = await window.storage.get('p52:atividades', true); return s ? JSON.parse(s.value) : []; }catch(e){ return []; }
+}
+async function p52SaveAtividades(list){
+  try{ await window.storage.set('p52:atividades', JSON.stringify(list), true); }catch(e){}
+}
+async function p52LoadStatusDay(ds){
+  try{ const key = 'p52:status:'+ds; const s = await window.storage.get(key, true); return s ? JSON.parse(s.value) : {}; }catch(e){ return {}; }
+}
+async function p52SaveStatusDay(ds, data){
+  try{ const key = 'p52:status:'+ds; await window.storage.set(key, JSON.stringify(data), true); }catch(e){}
+}
+
+// Escuta execuções do Plano de Limpeza em tempo real
+// IMPORTANTE: o Plano de Limpeza grava em 'checklist:{data}' (via window.storage),
+// não em 'dias/{data}'. O caminho real no Firebase é encodeKey('checklist:'+ds).
+function p52StartFirebaseSync(){
+  if(p52FirebaseListener) return;
+  const days = p52GetWeekDates(p52WeekOffset);
+  days.forEach(d => {
+    const ds = p52DateStr(d);
+    fbRoot.child(encodeKey('checklist:'+ds)).on('value', snap => {
+      if(!snap.exists()) return;
+      let dayData;
+      try{ dayData = JSON.parse(snap.val()); }catch(e){ return; }
+      p52SyncDayFromChecklist(ds, dayData).then(()=>{
+        if(section === 'p52sem') { p52RenderWeek(); }
+      });
+    });
+  });
+  p52FirebaseListener = true;
+}
+
+// Marca como E (executado) ou NR (não realizado) as atividades do plano 52 vinculadas ao
+// mesmo local, de acordo com o estado real gravado no Plano de Limpeza.
+// Formato real de dayData (vindo de 'checklist:{data}'): chave "local|turno|idx" -> {state,ts,emp}
+// state: 'done' = executado (✓ verde) | 'bad' = marcado como não realizado (✗ vermelho) |
+// ausente/'pending' = ainda não mexido (não altera o Plano 52 aqui; isso só é decidido no
+// fechamento do dia, em p52ConsolidatePreviousDay).
+async function p52SyncDayFromChecklist(ds, dayData){
+  if(!dayData || !p52Atividades.length) return;
+  const statusDay = await p52LoadStatusDay(ds);
+  let changed = false;
+
+  for(const [key, occData] of Object.entries(dayData)){
+    if(!occData || (occData.state !== 'done' && occData.state !== 'bad')) continue;
+    const parts = key.split('|');
+    const locName = parts[0];
+    const turnKey = parts[1]; // T1D, T2D, T1N, T2N
+    const executor = occData.emp || occData.who || '';
+    const ts = occData.ts || '';
+    const novoStatus = occData.state === 'done' ? 'E' : 'NR';
+
+    const matching = p52Atividades.filter(a => {
+      if(a.fonte === 'extra') return p52MatchLocal(a.area, locName);
+      // Alias 1→N (ex: Auditório → Sala Ladicá, Sala Ladilá): casa se locName bater com QUALQUER uma das salas
+      if(P52_ALIAS_MULTI[a.area]) return P52_ALIAS_MULTI[a.area].some(nome => p52MatchLocal(nome, locName));
+      return p52MatchLocal(P52_ALIAS[a.area] || a.area, locName);
+    });
+
+    for(const atv of matching){
+      const aid = atv.id;
+      const atual = statusDay[aid];
+      // Não sobrescreve um status ajustado manualmente na aba Plano 52, nem repete uma
+      // gravação idêntica à que já existe.
+      if(atual && (atual.manual || atual.status === novoStatus)) continue;
+      statusDay[aid] = {status: novoStatus, resp: executor, ts, manual:false};
+      changed = true;
+    }
+  }
+
+  if(changed) await p52SaveStatusDay(ds, statusDay);
+  p52StatusCache[ds] = statusDay;
+}
+
+function p52MatchLocal(a, b){
+  if(!a||!b) return false;
+  const n = s => s.toLowerCase().trim().replace(/[^a-z0-9]/g,'');
+  return n(a) === n(b) || n(a).includes(n(b)) || n(b).includes(n(a));
+}
+
+// Desfaz, no Plano 52 Semanas, somente os status gravados pela marcação que acabou de ser
+// removida no Plano de Limpeza — identificados pelo mesmo horário de registro (ts) e
+// executante daquela marcação específica. Ajustes manuais (marcados como "manual") e
+// execuções de outros horários nunca são tocados.
+async function p52UndoFromChecklist(locName, turnKey, date, entry){
+  if(!entry || !entry.ts || !p52Atividades.length) return;
+  const ds = p52DateStr(date);
+  const areasEncontradas = p52ResolveLocalToAreas(locName);
+  if(!areasEncontradas.length) return;
+
+  const isDiurno = turnKey === 'T1D' || turnKey === 'T2D';
+  const turnoFiltro = isDiurno ? '1T' : '2T';
+  const atvsDoLocal = p52Atividades.filter(a =>
+    areasEncontradas.includes(a.area) &&
+    (a.turno.includes(turnoFiltro) || a.turno.includes('1T/2T'))
+  );
+  if(!atvsDoLocal.length) return;
+
+  const statusDay = await p52LoadStatusDay(ds);
+  let changed = false;
+  for(const atv of atvsDoLocal){
+    const salvo = statusDay[atv.id];
+    if(!salvo || salvo.manual) continue; // nunca mexe em ajuste manual
+    // Reverte apenas o que foi gravado pelo mesmo executante desta marcação (a marcação que
+    // acabou de ser desfeita no Plano de Limpeza). Não mexe em execuções de outra pessoa.
+    if(salvo.resp === entry.emp){
+      delete statusDay[atv.id];
+      changed = true;
+    }
+  }
+  if(changed){
+    await p52SaveStatusDay(ds, statusDay);
+    p52StatusCache[ds] = statusDay;
+  }
+}
+
+// Varre TODOS os dias já gravados no checklist (window.storage, chaves 'checklist:*') e
+// sincroniza com o Plano 52 Semanas. Necessário porque a sincronização em tempo real (ver
+// saveDay) só passou a existir a partir desta correção — sem este backfill, qualquer
+// execução registrada no Plano de Limpeza ANTES dela ficaria sem preenchimento aqui.
+// É seguro rodar de novo a qualquer momento (idempotente — não duplica nem sobrescreve
+// status manuais).
+async function p52BackfillFromChecklist(){
+  try{
+    const res = await window.storage.list('checklist:', false);
+    const keys = res && res.keys ? res.keys : [];
+    let diasComExecucao = 0;
+    for(const key of keys){
+      const ds = key.replace(/^checklist:/, '');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(ds)) continue;
+      let dayData;
+      try{
+        const raw = await window.storage.get(key, false);
+        dayData = raw ? JSON.parse(raw.value) : null;
+      }catch(e){ continue; }
+      if(dayData && Object.keys(dayData).length){
+        await p52SyncDayFromChecklist(ds, dayData);
+        diasComExecucao++;
+      }
+    }
+    console.log('[Plano52] backfill concluído — '+keys.length+' dias verificados, '+diasComExecucao+' com execução sincronizada.');
+  }catch(e){
+    console.error('[Plano52] falha no backfill de execuções do Plano de Limpeza (não bloqueia o sistema):', e);
+  }
+}
+
+// Consolidação diária às 00:00 (idempotente)
+// ════════════════════════════════════════════════════════════
+// INTEGRAÇÃO: CHECKLIST DE ATIVIDADES NA CONCLUSÃO DA OCORRÊNCIA
+// ════════════════════════════════════════════════════════════
+// Chamada pelo Plano de Limpeza ao clicar em "Concluir" (após escolher o responsável).
+// Retorna: true = pode prosseguir e gravar o quadradinho | false = usuário cancelou.
+//
+// Resolve o local (usando aliases + multi-alias), busca as atividades do Plano52
+// vinculadas + previstas para a data/turno, e se houver alguma, abre o checklist.
+// Se não houver nenhuma atividade vinculada, retorna true direto (comportamento
+// atual do Sistema de Limpeza é preservado sem nenhuma mudança visual).
+function p52ResolveLocalToAreas(locName){
+  const areas = new Set();
+  for(const atv of p52Atividades){
+    if(atv.fonte === 'extra'){
+      if(p52MatchLocal(atv.area, locName)) areas.add(atv.area);
+      continue;
+    }
+    if(P52_ALIAS_MULTI[atv.area]){
+      if(P52_ALIAS_MULTI[atv.area].some(n=>p52MatchLocal(n, locName))) areas.add(atv.area);
+      continue;
+    }
+    const oficial = P52_ALIAS[atv.area] || atv.area;
+    if(p52MatchLocal(oficial, locName)) areas.add(atv.area);
+  }
+  return [...areas];
+}
+
+async function p52TryOpenChecklist(locName, turnKey, date, empName, horario){
+  // Se o preload de boot ainda não terminou (race condition rara), aguarda até 3s por ele.
+  if(!p52Atividades.length){
+    for(let tries=0; tries<6 && !p52Atividades.length; tries++){
+      await new Promise(r=>setTimeout(r, 500));
+    }
+  }
+  // Fallback final: tenta carregar direto, caso o preload de boot tenha falhado de fato.
+  if(!p52Atividades.length){
+    try{
+      p52Meta = await p52LoadMeta();
+      p52Atividades = await p52LoadAtividades();
+    }catch(e){
+      console.error('[Plano52] não foi possível carregar atividades — checklist não será exibido.', e);
+      return true;
+    }
+  }
+  if(!p52Meta || !p52Atividades.length){
+    console.warn('[Plano52] nenhuma atividade carregada — o Excel foi importado?');
+    return true;
+  }
+
+  const areasEncontradas = p52ResolveLocalToAreas(locName);
+  if(!areasEncontradas.length){
+    console.log('[Plano52] local "'+locName+'" não tem atividades vinculadas no Plano52.');
+    return true;
+  }
+
+  const isDiurno = turnKey === 'T1D' || turnKey === 'T2D';
+  const turnoFiltro = isDiurno ? '1T' : '2T';
+
+  // Atividades previstas no Plano de 52 Semanas para esta área, nesta data/semana,
+  // considerando a periodicidade de cada uma (p52IsPlanned) e o turno correspondente.
+  const atvsDoLocal = p52Atividades.filter(a =>
+    areasEncontradas.includes(a.area) &&
+    (a.turno.includes(turnoFiltro) || a.turno.includes('1T/2T')) &&
+    p52IsPlanned(a, date)
+  );
+
+  if(!atvsDoLocal.length){
+    console.log('[Plano52] áreas encontradas ('+areasEncontradas.join(', ')+') mas nenhuma atividade passou o filtro de turno/periodicidade para '+p52DateStr(date)+' turno '+turnKey+'.');
+    return true;
+  }
+
+  // Nome de área "oficial" do Plano52 (pode diferir ligeiramente do nome exibido no
+  // Plano de Limpeza, ex.: alias). Usa o primeiro encontrado para título/navegação.
+  const areaOficial = areasEncontradas[0];
+
+  return new Promise(async resolve => {
+    const ds = p52DateStr(date);
+
+    // Carrega o que já estava salvo para esta data ANTES de montar o checklist. Se esta
+    // execução já tinha sido registrada antes (edição), cada atividade reflete o estado
+    // real salvo (uma atividade desmarcada como NR continua desmarcada ao reabrir) — só
+    // vem tudo pré-marcado quando não existe nenhum registro anterior para ela.
+    const statusExistente = await p52LoadStatusDay(ds);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'p52ChecklistOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+
+    const rowsHtml = atvsDoLocal.map((atv,i) => {
+      const salvo = statusExistente[atv.id];
+      const marcado = !salvo || salvo.status !== 'NR'; // só vem desmarcado se já foi salvo como NR
+      return `
+      <tr data-p52-row="${i}" style="border-bottom:1px solid var(--line);">
+        <td style="padding:10px 8px;font-size:13.5px;color:var(--text);">${atv.atividade}</td>
+        <td style="padding:10px 8px;text-align:center;width:70px;">
+          <input type="checkbox" data-p52-idx="${i}" ${marcado?'checked':''}
+            style="width:20px;height:20px;accent-color:var(--ok);cursor:pointer;">
+        </td>
+      </tr>`;
+    }).join('');
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:0;max-width:480px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:20px 20px 12px;border-bottom:1px solid var(--line);">
+          <div>
+            <div style="font-size:16px;font-weight:700;color:var(--text);">Confirmar atividades — ${areaOficial}</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.6;">
+              <strong>Executante:</strong> ${empName} &nbsp;|&nbsp; <strong>Data:</strong> ${fmtBR(date)} ${horario?'&nbsp;|&nbsp; <strong>Horário:</strong> '+horario:''}
+            </div>
+          </div>
+          <button id="p52ChkClose" style="background:transparent;border:none;color:var(--text-dim);font-size:18px;cursor:pointer;line-height:1;padding:2px 4px;">✕</button>
+        </div>
+        <div style="padding:12px 20px 0;font-size:11.5px;color:var(--text-dim);">
+          Atividades previstas para esta data (Plano 52 Semanas) — todas vêm marcadas como realizadas; desmarque as que não foram feitas.
+        </div>
+        <div style="overflow-y:auto;flex:1;margin:10px 20px 0;border:1px solid var(--line);border-radius:8px;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--panel-2);">
+                <th style="text-align:left;padding:9px 8px;font-size:11px;color:var(--teal-bright);text-transform:uppercase;letter-spacing:.3px;">Atividades previstas</th>
+                <th style="text-align:center;padding:9px 8px;font-size:11px;color:var(--teal-bright);text-transform:uppercase;letter-spacing:.3px;width:70px;">Realizado</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:10px;padding:16px 20px;">
+          <button id="p52ChkCancel" class="btn secondary" style="flex:1;">Cancelar</button>
+          <button id="p52ChkConfirm" class="btn" style="flex:1;">Salvar</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#p52ChkCancel').addEventListener('click', ()=>{
+      overlay.remove();
+      resolve(false);
+    });
+    overlay.querySelector('#p52ChkClose').addEventListener('click', ()=>{
+      overlay.remove();
+      resolve(false);
+    });
+    overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); resolve(false); } });
+
+    overlay.querySelector('#p52ChkConfirm').addEventListener('click', async ()=>{
+      const checkboxes = overlay.querySelectorAll('input[data-p52-idx]');
+      const statusDay = await p52LoadStatusDay(ds);
+      const nowIso = new Date().toISOString();
+      let realizadas = 0, naoRealizadas = 0;
+
+      checkboxes.forEach(cb => {
+        const idx = parseInt(cb.getAttribute('data-p52-idx'));
+        const atv = atvsDoLocal[idx];
+        const realizado = cb.checked;
+        if(realizado) realizadas++; else naoRealizadas++;
+        statusDay[atv.id] = {
+          status: realizado ? 'E' : 'NR',
+          resp: empName,
+          ts: nowIso,
+          manual: false,
+        };
+      });
+
+      await p52SaveStatusDay(ds, statusDay);
+      p52StatusCache[ds] = statusDay;
+      overlay.remove();
+
+      p52ShowSuccessModal(atvsDoLocal.length, realizadas, naoRealizadas, areaOficial, date);
+      resolve(true);
+    });
+  });
+}
+
+// Modal de confirmação exibido após salvar a execução, com o resumo do que foi
+// registrado. Ao clicar OK, leva direto para o Plano 52 Semanas já filtrado nesta
+// área e na semana correta — assim o executante vê o resultado ("R" nas atividades
+// realizadas) imediatamente, sem precisar navegar manualmente.
+function p52ShowSuccessModal(total, realizadas, naoRealizadas, area, date){
+  const overlay = document.createElement('div');
+  overlay.id = 'p52SuccessOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:28px 24px;max-width:380px;width:100%;text-align:center;">
+      <div style="font-size:44px;color:var(--ok);margin-bottom:10px;">✅</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:14px;">Execução registrada com sucesso!</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px;line-height:1.6;">
+        ${total} atividades previstas<br>
+        <span style="color:var(--ok);font-weight:700;">${realizadas} realizada${realizadas===1?'':'s'}</span> ·
+        <span style="color:var(--bad);font-weight:700;">${naoRealizadas} não realizada${naoRealizadas===1?'':'s'}</span>
+      </div>
+      <button id="p52SuccessOk" class="btn" style="width:100%;">OK</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  // Fecha e permanece no Plano de Limpeza — não navega para o Plano 52 Semanas.
+  // O Plano 52 já foi atualizado em segundo plano (status salvo antes deste modal aparecer).
+  let closed = false;
+  const close = ()=>{ if(closed) return; closed = true; overlay.remove(); };
+  overlay.querySelector('#p52SuccessOk').addEventListener('click', close);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) close(); });
+  setTimeout(close, 2200); // fecha sozinho — confirmação rápida, não trava o fluxo
+}
+
+// Calcula o offset de semana (relativo a p52GetWeekDates) cuja segunda-feira coincide
+// com a semana da data informada.
+function p52OffsetForDate(date){
+  const mondayOf = d=>{
+    const dow=d.getDay();
+    const m=new Date(d);
+    m.setDate(d.getDate()-(dow===0?6:dow-1));
+    m.setHours(0,0,0,0);
+    return m;
+  };
+  const todayMonday = mondayOf(p52Today());
+  const targetMonday = mondayOf(date);
+  return Math.round((targetMonday-todayMonday)/(7*86400000));
+}
+
+// Leva o usuário para a aba "Plano 52 Sem.", já filtrada na área executada e
+// posicionada na semana da data da execução — reaproveita a visão semanal existente
+// (p52RenderWeek), só pré-seleciona o filtro de área e o offset de semana corretos.
+function p52NavigateToAreaWeek(area, date){
+  section = 'p52sem';
+  document.querySelectorAll('.mainnav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('nav52')?.classList.add('active');
+  if(typeof renderTopControls === 'function') renderTopControls();
+  p52Filters.area = area;
+  p52WeekOffset = p52OffsetForDate(date);
+  p52View = 'semana';
+  renderP52();
+}
+
+// Fechamento do dia: qualquer atividade que estava prevista para "ontem" e não tem
+// nenhum status gravado (nem E nem NR vindo do Plano de Limpeza, nem ajuste manual) é
+// consolidada como NR — não foi executada.
+async function p52ConsolidatePreviousDay(){
+  const today = p52Today();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+  const ds = p52DateStr(yesterday);
+
+  const dayData = await loadDay(ds);
+  if(dayData) await p52SyncDayFromChecklist(ds, dayData);
+
+  const statusAfter = await p52LoadStatusDay(ds);
+  let changed = false;
+  for(const atv of p52Atividades){
+    const aid = atv.id;
+    if(!statusAfter[aid] && p52IsPlanned(atv, yesterday)){
+      statusAfter[aid] = {status:'NR', resp:'', ts:'', manual:false};
+      changed = true;
+    }
+  }
+  if(changed) await p52SaveStatusDay(ds, statusAfter);
+  p52StatusCache[ds] = statusAfter;
+}
+
+function p52IsPlanned(atv, date){
+  // Usa o calendário real importado da planilha (mais preciso: respeita dias específicos
+  // como "Terça e Sexta" para DMLs, "Domingo" para as Geladeiras, etc.) quando disponível.
+  if(Array.isArray(atv.planning) && atv.planning.length){
+    return atv.planning.includes(p52DateStr(date));
+  }
+  // Fallback genérico (atividades sem calendário importado, ex.: adicionadas manualmente)
+  if(atv.freq==='D') return true;
+  if(atv.freq==='S') return date.getDay()===1;
+  if(atv.freq==='Q'){ return p52WeekNum(date)%2===1; }
+  return true;
+}
+
+function p52ScheduleConsolidation(){
+  const now = p52Today();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0, 0, 5);
+  const msUntil = midnight - now;
+  setTimeout(async ()=>{
+    await p52ConsolidatePreviousDay();
+    p52ScheduleConsolidation();
+  }, msUntil);
+}
+
+// ── IMPORTAÇÃO DO EXCEL (SheetJS) ────────────────────────────
+
+async function p52ParseExcel(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = e => {
+      try{
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, {type:'array'});
+        const sheetName = wb.SheetNames.find(n=>n.trim().toLowerCase().includes('plan') && n.toLowerCase().includes('pt'));
+        if(!sheetName) throw new Error('Aba "Plan PT" não encontrada no Excel.');
+        const ws = wb.Sheets[sheetName];
+        resolve({wb, ws, sheetName});
+      }catch(err){ reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function p52ExtractFromSheet(ws){
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const maxRow = range.e.r+1;
+  const maxCol = range.e.c+1;
+  const cellVal = (r,c) => { const cell = ws[XLSX.utils.encode_cell({r,c})]; return cell ? cell.v : null; };
+
+  let headerRow = -1;
+  for(let r=0;r<30;r++){
+    for(let c=0;c<20;c++){
+      const v = cellVal(r,c);
+      if(v && String(v).trim()==='Área'){ headerRow=r; break; }
+    }
+    if(headerRow>=0) break;
+  }
+  if(headerRow<0) throw new Error('Estrutura do Excel não reconhecida (cabeçalho não encontrado).');
+
+  const dateRow = headerRow+1;
+  const monthRow = headerRow-1;
+
+  const MES_MAP = {
+    'JANEIRO':1,'ENERO':1,'FEVEREIRO':2,'FEBRERO':2,'MARÇO':3,'MARZO':3,' ':3,
+    'ABRIL':4,'MAYO':5,'JUNIO':6,'JULIO':7,'AGOSTO':8,'SEPTIEMBRE':9,
+    'OCTUBRE':10,'NOVIEMBRE':11,'DICIEMBRE':12,'OUTUBRO':10,'NOVEMBRO':11,'DEZEMBRO':12
+  };
+  const monthStarts = [];
+  for(let c=0;c<maxCol;c++){
+    const v = cellVal(monthRow,c);
+    if(v!=null){ const key = String(v).trim(); if(MES_MAP[key]!==undefined) monthStarts.push({col:c, mes:MES_MAP[key]}); }
+  }
+
+  const colToDate = {};
+  for(let i=0;i<monthStarts.length;i++){
+    const {col:cStart, mes} = monthStarts[i];
+    const cEnd = i+1<monthStarts.length ? monthStarts[i+1].col : maxCol;
+    for(let c=cStart;c<cEnd;c++){
+      const day = cellVal(dateRow,c);
+      if(day!=null && !isNaN(day)){ try{ colToDate[c] = new Date(2026,mes-1,parseInt(day)); }catch(e){} }
+    }
+  }
+
+  const atividades = [];
+  let currentArea = null;
+  const dataStart = dateRow+2;
+
+  // NOTA (corrigido em 03/09/2026): a estrutura real do arquivo MG02 tem Área na coluna B,
+  // Atividade na coluna E e Frequência na coluna H (índices 0-based 1, 4, 7) — não C/F/I
+  // como a versão anterior deste parser assumia. O turno de fato aplicável a cada atividade
+  // vem dos booleanos da LINHA DE BAIXO (execução), colunas I/J/K — a linha de cima só tem
+  // os rótulos fixos '1T'/'2T'/'3T', por isso não dava para usar t1Cell/t2Cell da mesma linha.
+  for(let r=dataStart;r<maxRow;r++){
+    const areaCell = cellVal(r,1);
+    if(areaCell && String(areaCell).trim()) currentArea = String(areaCell).trim();
+    const atvCell = cellVal(r,4);
+    const freqCell = cellVal(r,7);
+    if(!atvCell || !freqCell) continue;
+    if(currentArea === 'Buffers') continue; // REMOVIDO
+
+    const atv = String(atvCell).trim();
+    const freq = String(freqCell).trim();
+
+    const turnoBool1 = cellVal(r+1,8);   // coluna I da linha de execução -> 1T
+    const turnoBool2 = cellVal(r+1,9);   // coluna J -> 2T
+    const turnoBool3 = cellVal(r+1,10);  // coluna K -> 3T (tratado como 2T/noturno no app)
+    const turnoParts = [];
+    if(turnoBool1) turnoParts.push('1T');
+    if(turnoBool2 || turnoBool3) turnoParts.push('2T');
+    const turno = turnoParts.length ? turnoParts.join('/') : '1T';
+
+    // Resolve aliases aqui mesmo (independente de diferenças de maiúsculas/minúsculas com
+    // P52_ALIAS), para já gravar o nome oficial do Sistema e casar direto com o checklist.
+    const areaKeyLower = (currentArea||'').trim().toLowerCase();
+    const aliasHit = Object.keys(P52_ALIAS).find(k => k.toLowerCase() === areaKeyLower);
+    const areaResolved = aliasHit ? (P52_ALIAS[aliasHit] || currentArea) : (currentArea||'');
+
+    const planning = [];
+    for(const [col,date] of Object.entries(colToDate)){
+      const v = cellVal(r,parseInt(col));
+      if(v!=null && String(v).trim()==='P'){ planning.push(p52DateStr(date)); }
+    }
+
+    const id = p52AtvId(areaResolved||'', atv);
+    atividades.push({id, area:areaResolved||'', atividade:atv, freq, turno, planning, fonte:'excel'});
+  }
+
+  return {atividades, colToDate};
+}
+
+async function p52DoImport(file, onProgress){
+  onProgress('Lendo arquivo Excel…');
+  const {ws} = await p52ParseExcel(file);
+
+  onProgress('Extraindo atividades…');
+  const {atividades} = p52ExtractFromSheet(ws);
+
+  onProgress('Adicionando áreas extras (Sorter, Mezanino, HS, HV)…');
+  const extraAtv = [];
+  for(const area of P52_AREAS_EXTRA){
+    for(const a of area.atividades){
+      const id = p52AtvId(area.nome, a.atv);
+      const planning = [];
+      for(let m=0;m<12;m++){
+        const dias = new Date(2026,m+1,0).getDate();
+        for(let d=1;d<=dias;d++){
+          planning.push(p52DateStr(new Date(2026,m,d)));
+        }
+      }
+      extraAtv.push({id, area:area.nome, atividade:a.atv, freq:a.freq, turno:a.turno, planning, fonte:'extra'});
+    }
+  }
+
+  const all = [...atividades, ...extraAtv];
+  onProgress('Gravando '+all.length+' atividades…');
+  await p52SaveAtividades(all);
+  p52Atividades = all;
+
+  const meta = {importedAt: new Date().toISOString(), totalAtv:all.length, version:1};
+  await p52SaveMeta(meta);
+  p52Meta = meta;
+
+  onProgress('Sincronizando execuções passadas (Jul–Ago 2026)…');
+  await p52SyncRetroactive();
+
+  onProgress('Concluído!');
+  return {total:all.length, extras:extraAtv.length, fromExcel:atividades.length};
+}
+
+async function p52SyncRetroactive(){
+  const start = new Date(2026,6,1);
+  const today = p52Today();
+  const end = new Date(Math.min(today.getTime(), new Date(2026,7,31).getTime()));
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
+    const ds = p52DateStr(new Date(d));
+    try{
+      const dayData = await loadDay(ds);
+      if(dayData) await p52SyncDayFromChecklist(ds, dayData);
+    }catch(e){}
+  }
+}
+
+// ── RENDER PRINCIPAL ──────────────────────────────────────────
+
+async function renderP52(){
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="loading">Carregando Plano 52 Semanas…</div>';
+
+  p52Meta = await p52LoadMeta();
+  p52Atividades = await p52LoadAtividades();
+
+  if(!p52Meta || !p52Atividades.length){
+    renderP52Import();
+    return;
+  }
+  renderP52Main();
+}
+
+// ── TELA DE IMPORTAÇÃO ────────────────────────────────────────
+
+function renderP52Import(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+<div style="max-width:700px;margin:0 auto;">
+  <div style="background:var(--panel);border:2px dashed var(--line);border-radius:16px;padding:48px 32px;text-align:center;margin-bottom:24px;" id="p52DropZone">
+    <div style="font-size:48px;margin-bottom:16px;">📊</div>
+    <h2 style="font-size:20px;font-weight:700;margin-bottom:8px;">Importar Plano de 52 Semanas</h2>
+    <p style="font-size:14px;color:var(--text-dim);margin-bottom:24px;line-height:1.6;">
+      Selecione o arquivo <strong style="color:var(--teal-bright);">Plano de 52 Semanas - Limpeza.xlsx</strong><br>
+      O sistema vai ler, validar e mostrar uma prévia antes de importar.
+    </p>
+    <input type="file" id="p52FileInput" accept=".xlsx" style="display:none">
+    <button class="btn" onclick="document.getElementById('p52FileInput').click()" style="font-size:15px;padding:14px 32px;">
+      📂 Selecionar arquivo Excel
+    </button>
+    <div style="font-size:12px;color:var(--text-dim);margin-top:12px;">
+      Apenas .xlsx · Aba "Plan PT" · Áreas Buffers serão ignoradas
+    </div>
+  </div>
+
+  <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;">
+    <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;">Áreas que serão criadas automaticamente no sistema</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ Sorter</span>
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ Mezanino</span>
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ HS</span>
+      <span style="background:rgba(63,214,201,.12);color:var(--teal-bright);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">+ HV</span>
+      <span style="background:rgba(217,106,90,.12);color:var(--bad);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;">× Buffers removido</span>
+    </div>
+    <div style="margin-top:14px;font-size:12px;color:var(--text-dim);">
+      <strong style="color:var(--text);">Legenda após importação:</strong>
+      <span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:rgba(76,175,110,.15);color:var(--ok);font-weight:700;">E</span> Executado &nbsp;
+      <span style="padding:2px 8px;border-radius:4px;background:rgba(227,179,65,.15);color:var(--amber);font-weight:700;">PE</span> Pendente &nbsp;
+      <span style="padding:2px 8px;border-radius:4px;background:rgba(217,106,90,.15);color:var(--bad);font-weight:700;">NR</span> Não Realizado &nbsp;
+      <span style="padding:2px 8px;border-radius:4px;background:rgba(167,139,250,.15);color:#a78bfa;font-weight:700;">R</span> Reprogramado
+    </div>
+  </div>
+
+  <div id="p52ImportStatus" style="margin-top:16px;"></div>
+</div>`;
+
+  const input = document.getElementById('p52FileInput');
+  input.addEventListener('change', e => {
+    if(e.target.files[0]) p52HandleFileSelected(e.target.files[0]);
+  });
+
+  const dz = document.getElementById('p52DropZone');
+  dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.style.borderColor='var(--teal-bright)'; });
+  dz.addEventListener('dragleave', ()=>{ dz.style.borderColor='var(--line)'; });
+  dz.addEventListener('drop', e=>{ e.preventDefault(); dz.style.borderColor='var(--line)'; if(e.dataTransfer.files[0]) p52HandleFileSelected(e.dataTransfer.files[0]); });
+}
+
+async function p52HandleFileSelected(file){
+  const status = document.getElementById('p52ImportStatus');
+  status.innerHTML = `<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;text-align:center;">
+    <div style="font-size:24px;margin-bottom:8px;">⚙️</div>
+    <div id="p52ProgMsg" style="font-size:14px;color:var(--text-dim);">Iniciando…</div>
+    <div style="height:4px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin:12px 0;">
+      <div style="height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-bright));animation:loadAnim 1.4s ease-in-out infinite;"></div>
+    </div>
+  </div>`;
+
+  const setMsg = m => { const el=document.getElementById('p52ProgMsg'); if(el) el.textContent=m; };
+
+  try{
+    setMsg('Lendo arquivo Excel…');
+    const {ws} = await p52ParseExcel(file);
+    setMsg('Analisando estrutura…');
+    const {atividades} = p52ExtractFromSheet(ws);
+    const total = atividades.length + P52_AREAS_EXTRA.reduce((s,a)=>s+a.atividades.length,0);
+
+    status.innerHTML = `
+<div style="background:var(--panel);border:1px solid var(--teal);border-radius:12px;padding:20px;">
+  <div style="font-size:15px;font-weight:700;margin-bottom:16px;">📋 Prévia da Importação</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;">
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">${atividades.length}</div>
+      <div style="font-size:11px;color:var(--text-dim);">Do Excel</div>
+    </div>
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">+${P52_AREAS_EXTRA.reduce((s,a)=>s+a.atividades.length,0)}</div>
+      <div style="font-size:11px;color:var(--text-dim);">Sorter/Mez/HS/HV</div>
+    </div>
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">${total}</div>
+      <div style="font-size:11px;color:var(--text-dim);">Total de atividades</div>
+    </div>
+    <div style="background:var(--panel-2);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;color:var(--teal-bright);">52</div>
+      <div style="font-size:11px;color:var(--text-dim);">Semanas · 2026</div>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;background:rgba(227,179,65,.08);border:1px solid rgba(227,179,65,.2);border-radius:8px;padding:10px;">
+    ⚠️ <strong style="color:var(--amber);">Buffers</strong> removido do plano · 
+    Execuções do Plano de Limpeza de <strong>Jul–Ago</strong> serão sincronizadas retroativamente.
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <button class="btn" id="p52ConfirmBtn" style="background:var(--ok);color:#06210f;padding:12px 28px;font-size:14px;">✅ Confirmar importação</button>
+    <button class="btn secondary" onclick="renderP52Import()">Cancelar</button>
+  </div>
+  <div id="p52ImportProgress" style="margin-top:12px;"></div>
+</div>`;
+
+    document.getElementById('p52ConfirmBtn').addEventListener('click', async ()=>{
+      document.getElementById('p52ConfirmBtn').disabled = true;
+      document.getElementById('p52ConfirmBtn').textContent = '⏳ Importando…';
+      const prog = document.getElementById('p52ImportProgress');
+      const result = await p52DoImport(file, msg=>{
+        if(prog) prog.innerHTML = `<div style="font-size:13px;color:var(--text-dim);">${msg}</div>`;
+      });
+      p52StartFirebaseSync();
+      p52ScheduleConsolidation();
+      renderP52Main();
+    });
+
+  }catch(err){
+    status.innerHTML = `<div style="background:rgba(217,106,90,.1);border:1px solid var(--bad);border-radius:10px;padding:16px;color:var(--bad);">
+      ❌ Erro ao ler Excel: ${err.message}
+    </div>`;
+  }
+}
+
+// ── TELA PRINCIPAL ────────────────────────────────────────────
+
+function renderP52Main(){
+  const app = document.getElementById('app');
+  const isAdminNow = document.getElementById('navAdmin')?.classList.contains('active');
+
+  app.innerHTML = `
+<style>
+.p52-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 0;margin-bottom:14px;border-bottom:1px solid var(--line);}
+.p52-toolbar select{background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:8px;font-size:13px;font-family:inherit;}
+.p52-vseg{display:flex;background:rgba(0,0,0,.25);border-radius:8px;padding:3px;gap:2px;}
+.p52-vseg button{border:none;background:transparent;color:#cfeae7;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;}
+.p52-vseg button.active{background:var(--bg);color:var(--teal-bright);}
+.p52-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12px;color:var(--text-dim);}
+.p52-legend .li{display:flex;align-items:center;gap:5px;}
+.p52-cell{width:36px;height:28px;border-radius:5px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .1s;border:1px solid transparent;user-select:none;}
+.p52-cell:hover{transform:scale(1.12);}
+.p52-cell.E{background:rgba(76,175,110,.2);color:var(--ok);border-color:rgba(76,175,110,.4);}
+.p52-cell.PE{background:rgba(227,179,65,.15);color:var(--amber);border-color:rgba(227,179,65,.3);}
+.p52-cell.NR{background:rgba(217,106,90,.2);color:var(--bad);border-color:rgba(217,106,90,.4);}
+.p52-cell.R{background:rgba(167,139,250,.15);color:#a78bfa;border-color:rgba(167,139,250,.3);}
+.p52-cell.NP{background:var(--panel-2);color:var(--text-dim);opacity:.45;cursor:default;}
+.p52-cell.future{background:transparent;border-color:transparent;color:var(--text-dim);opacity:.2;cursor:default;}
+.p52-week-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.p52-table{border-collapse:collapse;width:100%;min-width:700px;}
+.p52-table th{background:var(--panel-2);color:var(--teal-bright);font-size:12px;font-weight:700;padding:8px 6px;text-align:center;border:1px solid var(--line);white-space:nowrap;}
+.p52-table th.today-col{background:rgba(63,214,201,.12);color:var(--teal-bright);}
+.p52-table th.col-area{text-align:left;min-width:130px;padding-left:12px;}
+.p52-table th.col-atv{text-align:left;min-width:170px;padding-left:10px;}
+.p52-table th.col-freq{min-width:40px;}
+.p52-table td{border:1px solid var(--line);padding:4px 5px;vertical-align:middle;}
+.p52-table td.area-hdr{background:var(--panel-2);font-size:11px;font-weight:700;color:var(--teal-bright);text-transform:uppercase;letter-spacing:.4px;padding:7px 12px;}
+.p52-table td.atv-name{font-size:12.5px;font-weight:600;padding:6px 10px;max-width:200px;line-height:1.3;}
+.p52-table td.atv-freq{text-align:center;font-size:11px;color:var(--text-dim);}
+.p52-table td.today-col{background:rgba(63,214,201,.04);}
+.p52-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.p52-nav .lbl{font-size:15px;font-weight:700;}
+.p52-nav .sub{font-size:12px;color:var(--text-dim);}
+.p52-prog{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.p52-prog .prog-lbl{font-size:12px;color:var(--text-dim);min-width:120px;}
+.p52-prog .prog-track{flex:1;height:7px;background:var(--panel-2);border-radius:5px;overflow:hidden;}
+.p52-prog .prog-fill{height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-bright));border-radius:5px;transition:width .3s;}
+.p52-prog .prog-pct{font-size:13px;font-weight:700;color:var(--teal-bright);min-width:40px;text-align:right;}
+.p52-ctx{position:fixed;background:var(--panel);border:1px solid var(--teal);border-radius:10px;z-index:9999;min-width:180px;box-shadow:0 8px 28px rgba(0,0,0,.5);padding:6px 0;}
+.p52-ctx button{display:block;width:100%;background:transparent;border:none;color:var(--text);padding:10px 16px;font-size:13px;text-align:left;cursor:pointer;}
+.p52-ctx button:hover{background:var(--panel-2);color:var(--teal-bright);}
+.p52-ctx .ctx-sep{height:1px;background:var(--line);margin:4px 0;}
+.p52-month-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;}
+.p52-month-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.p52-month-card-head{background:var(--panel-2);padding:9px 14px;font-size:12px;font-weight:700;color:var(--teal-bright);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--line);}
+.p52-month-row{padding:8px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;}
+.p52-month-row:last-child{border-bottom:none;}
+.p52-month-atv{flex:1;font-size:12.5px;font-weight:600;line-height:1.3;}
+.p52-mini-bar{display:flex;gap:2px;flex-wrap:wrap;max-width:160px;}
+.p52-mini-d{width:9px;height:9px;border-radius:2px;}
+.p52-annual-wrap{overflow-x:auto;}
+.p52-annual-table{border-collapse:collapse;width:100%;min-width:900px;}
+.p52-annual-table th{background:var(--panel-2);color:var(--teal-bright);font-size:11px;font-weight:700;padding:7px 8px;text-align:center;border:1px solid var(--line);}
+.p52-annual-table th.col-l{text-align:left;min-width:110px;}
+.p52-annual-table th.col-atv{text-align:left;min-width:160px;}
+.p52-annual-table td{border:1px solid var(--line);padding:4px 5px;text-align:center;font-size:11px;}
+.p52-annual-table td.col-l{text-align:left;font-size:11px;color:var(--text-dim);padding-left:10px;}
+.p52-annual-table td.col-atv{text-align:left;font-weight:600;font-size:12px;padding-left:8px;}
+.p52-ann-cell{display:inline-block;width:36px;border-radius:4px;font-size:10px;font-weight:700;padding:2px 0;text-align:center;}
+@keyframes loadAnim{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
+</style>
+
+<div class="p52-toolbar">
+  <div class="p52-vseg">
+    <button id="p52vSem" onclick="p52SetView('semana')" class="active">Semana</button>
+    <button id="p52vMes" onclick="p52SetView('mes')">Mês</button>
+    <button id="p52vAno" onclick="p52SetView('ano')">Anual</button>
+  </div>
+  <select id="p52fArea" onchange="p52Filters.area=this.value;p52RenderCurrent()">
+    <option value="" ${!p52Filters.area?'selected':''}>Todas as áreas</option>
+    ${[...new Set(p52Atividades.map(a=>a.area))].sort().map(a=>`<option ${p52Filters.area===a?'selected':''}>${a}</option>`).join('')}
+  </select>
+  <select id="p52fTurno" onchange="p52Filters.turno=this.value;p52RenderCurrent()">
+    <option value="">Todos os turnos</option>
+    <option value="1T">1T — Diurno</option>
+    <option value="2T">2T — Noturno</option>
+  </select>
+  <select id="p52fStatus" onchange="p52Filters.status=this.value;p52RenderCurrent()">
+    <option value="">Todos os status</option>
+    <option value="E">E — Executado</option>
+    <option value="PE">PE — Pendente</option>
+    <option value="NR">NR — Não Realizado</option>
+    <option value="R">R — Reprogramado</option>
+  </select>
+  <select id="p52fFreq" onchange="p52Filters.freq=this.value;p52RenderCurrent()">
+    <option value="">Todas as frequências</option>
+    <option value="D">D — Diária</option>
+    <option value="S">S — Semanal</option>
+    <option value="Q">Q — Quinzenal</option>
+  </select>
+  <button class="btn secondary" style="padding:7px 12px;font-size:12px;margin-left:auto;" onclick="p52ShowUpdateModal()">🔄 Atualizar Excel</button>
+  ${isAdminNow?`<button class="btn secondary" style="padding:7px 12px;font-size:12px;color:var(--amber);border-color:rgba(227,179,65,.3);" onclick="p52ConsolidatePreviousDay().then(()=>p52RenderCurrent())">🔒 Fechar dia</button>`:''}
+</div>
+
+<div class="p52-legend">
+  <div class="li"><div class="p52-cell E" style="cursor:default;width:28px;height:22px;font-size:10px;">R</div> Realizado</div>
+  <div class="li"><div class="p52-cell NR" style="cursor:default;width:28px;height:22px;font-size:10px;"></div> Não Realizado</div>
+  <div class="li"><div class="p52-cell PE" style="cursor:default;width:28px;height:22px;font-size:10px;">P</div> Previsto</div>
+  <div class="li"><div class="p52-cell NP" style="cursor:default;width:28px;height:22px;font-size:10px;">NA</div> Não Aplicável</div>
+  <div class="li"><div class="p52-cell R" style="cursor:default;width:28px;height:22px;font-size:10px;">R*</div> Reprogramado (ajuste manual)</div>
+</div>
+
+<div id="p52ViewContainer"></div>
+<div id="p52CtxMenu" class="p52-ctx" style="display:none;"></div>`;
+
+  p52SetView('semana');
+  p52StartFirebaseSync();
+  p52ScheduleConsolidation();
+
+  document.addEventListener('click', ()=>{ const m=document.getElementById('p52CtxMenu'); if(m) m.style.display='none'; }, true);
+}
+
+function p52SetView(v){
+  p52View = v;
+  ['Sem','Mes','Ano'].forEach(x=>document.getElementById('p52v'+x)?.classList.remove('active'));
+  document.getElementById('p52v'+v.charAt(0).toUpperCase()+v.slice(1))?.classList.add('active');
+  p52RenderCurrent();
+}
+
+async function p52RenderCurrent(){
+  if(p52View==='semana') await p52RenderWeek();
+  else if(p52View==='mes') await p52RenderMonth();
+  else await p52RenderAnnual();
+}
+
+// ── VISÃO SEMANAL ─────────────────────────────────────────────
+
+// Rótulo exibido dentro da célula (visual, conforme especificado): R = Realizado,
+// em branco = Não realizado, P = Previsto, NA = Não aplicável (fora da periodicidade).
+// O status interno (E/NR/PE/NP/R) não muda — isso é só a letra mostrada na tela.
+function p52DisplayLabel(st){
+  if(st==='E') return 'R';
+  if(st==='NR') return '';
+  if(st==='PE') return 'P';
+  if(st==='NP') return 'NA';
+  if(st==='R') return 'RP'; // reprogramado (ajuste manual) — distinto de "R" (Realizado)
+  return st;
+}
+
+async function p52RenderWeek(){
+  const cont = document.getElementById('p52ViewContainer');
+  if(!cont) return;
+  const days = p52GetWeekDates(p52WeekOffset);
+  const today = p52Today();
+  const todayStr = p52DateStr(today);
+
+  const statuses = {};
+  await Promise.all(days.map(async d=>{
+    const ds = p52DateStr(d);
+    statuses[ds] = await p52LoadStatusDay(ds);
+    p52StatusCache[ds] = statuses[ds];
+  }));
+
+  const d0=days[0], d6=days[6];
+  const wn = p52WeekNum(days[3]);
+
+  let atvs = p52Atividades;
+  if(p52Filters.area) atvs = atvs.filter(a=>a.area===p52Filters.area);
+  if(p52Filters.turno) atvs = atvs.filter(a=>a.turno.includes(p52Filters.turno));
+  if(p52Filters.freq) atvs = atvs.filter(a=>a.freq===p52Filters.freq);
+
+  let totalPlan=0, totalE=0;
+  for(const d of days){
+    const ds=p52DateStr(d);
+    if(d>today) continue;
+    for(const atv of atvs){
+      if(!p52IsPlanned(atv,d)) continue;
+      totalPlan++;
+      const st = statuses[ds]?.[atv.id]?.status;
+      if(st==='E') totalE++;
+    }
+  }
+  const pct = totalPlan>0 ? Math.round(totalE/totalPlan*100) : 0;
+
+  const areas = [...new Set(atvs.map(a=>a.area))];
+
+  let html = `
+<div class="p52-nav">
+  <button class="nav-btn" onclick="p52WeekOffset--;p52RenderWeek()">‹</button>
+  <div>
+    <div class="p52-nav lbl" style="margin:0;">Semana ${wn} — ${P52_MESES[days[3].getMonth()]} ${days[3].getFullYear()}</div>
+    <div class="p52-nav sub" style="margin:0;">${d0.toLocaleDateString('pt-BR')} → ${d6.toLocaleDateString('pt-BR')}</div>
+  </div>
+  <button class="nav-btn" onclick="p52WeekOffset++;p52RenderWeek()">›</button>
+  <button class="btn secondary" style="padding:5px 10px;font-size:12px;" onclick="p52WeekOffset=0;p52RenderWeek()">Hoje</button>
+</div>
+<div class="p52-prog">
+  <div class="prog-lbl">Semana ${wn} · execução</div>
+  <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+  <div class="prog-pct">${pct}%</div>
+</div>
+<div class="p52-week-wrap"><table class="p52-table"><thead><tr>
+  <th class="col-area">Área</th>
+  <th class="col-atv">Atividade</th>
+  <th class="col-freq">Freq</th>`;
+
+  days.forEach(d=>{
+    const ds=p52DateStr(d);
+    const isTod = ds===todayStr;
+    html+=`<th class="${isTod?'today-col':''}">${P52_DIAS[d.getDay()]}<br><span style="font-size:15px;font-weight:800;">${d.getDate()}</span></th>`;
+  });
+  html+=`</tr></thead><tbody>`;
+
+  for(const area of areas){
+    const areaAtvs = atvs.filter(a=>a.area===area);
+    if(!areaAtvs.length) continue;
+    const isExtra = p52Atividades.find(a=>a.area===area)?.fonte==='extra';
+    html+=`<tr><td colspan="${3+days.length}" class="area-hdr">${area}${isExtra?' <span style="font-size:10px;color:var(--teal-bright);opacity:.7;">(adicionado)</span>':''}</td></tr>`;
+
+    for(const atv of areaAtvs){
+      if(p52Filters.status){
+        const hasStatus = days.some(d=>{
+          const ds=p52DateStr(d);
+          return (statuses[ds]?.[atv.id]?.status||'NP')===p52Filters.status;
+        });
+        if(!hasStatus) continue;
+      }
+
+      html+=`<tr><td class="atv-name" colspan="1" style="font-size:11px;color:var(--text-dim);padding:5px 10px;">${atv.area}</td>
+        <td class="atv-name">${atv.atividade}</td>
+        <td class="atv-freq">${atv.freq}</td>`;
+
+      for(const d of days){
+        const ds=p52DateStr(d);
+        const isTod=ds===todayStr;
+        const isFut=d>today;
+        const planned=p52IsPlanned(atv,d);
+        // Qualquer atividade prevista que ainda não foi executada (hoje ou no futuro) fica
+        // marcada como "P" (Previsto/Programada) — só quando o dia já passou e nada foi
+        // registrado é que conta como não realizado.
+        const st = statuses[ds]?.[atv.id]?.status || (planned?((isFut||isTod)?'PE':'NR'):'NP');
+        const resp = statuses[ds]?.[atv.id]?.resp||'';
+        const manual = statuses[ds]?.[atv.id]?.manual||false;
+        const respTs = statuses[ds]?.[atv.id]?.ts||'';
+
+        const cellClass = !planned?'NP':st;
+        const title = `${atv.atividade} · ${d.toLocaleDateString('pt-BR')}${resp?' · '+resp:''}${manual?' · manual':''}`;
+        const clickable = !isFut && planned;
+
+        html+=`<td class="${isTod?'today-col':''}" style="text-align:center;">
+          <div class="p52-cell ${cellClass}" 
+            title="${title}"
+            ${clickable?`onclick="p52CellClick(event,'${atv.id}','${ds}','${st}','${atv.atividade.replace(/'/g,"\\'")}','${resp.replace(/'/g,"\\'")}','${respTs}')"`:''}
+          >${p52DisplayLabel(cellClass)}</div>
+        </td>`;
+      }
+      html+='</tr>';
+    }
+  }
+
+  html+='</tbody></table></div>';
+  cont.innerHTML = html;
+}
+
+// ── VISÃO MENSAL ──────────────────────────────────────────────
+
+async function p52RenderMonth(){
+  const cont = document.getElementById('p52ViewContainer');
+  const md = p52MonthDate(p52MonthOffset);
+  const year=md.getFullYear(), month=md.getMonth();
+  const daysInMonth = new Date(year,month+1,0).getDate();
+  const today = p52Today();
+
+  const statuses = {};
+  const promises = [];
+  for(let d=1;d<=daysInMonth;d++){
+    const ds = p52DateStr(new Date(year,month,d));
+    promises.push(p52LoadStatusDay(ds).then(s=>{ statuses[ds]=s; }));
+  }
+  await Promise.all(promises);
+
+  let atvs = p52Atividades;
+  if(p52Filters.area) atvs=atvs.filter(a=>a.area===p52Filters.area);
+  if(p52Filters.freq) atvs=atvs.filter(a=>a.freq===p52Filters.freq);
+
+  let totP=0,totE=0;
+  for(let d=1;d<=daysInMonth;d++){
+    const dt=new Date(year,month,d);
+    if(dt>today) continue;
+    const ds=p52DateStr(dt);
+    for(const atv of atvs){
+      if(!p52IsPlanned(atv,dt)) continue;
+      totP++;
+      if(statuses[ds]?.[atv.id]?.status==='E') totE++;
+    }
+  }
+  const pct=totP>0?Math.round(totE/totP*100):0;
+
+  const areas=[...new Set(atvs.map(a=>a.area))];
+
+  let html=`
+<div class="p52-nav">
+  <button class="nav-btn" onclick="p52MonthOffset--;p52RenderMonth()">‹</button>
+  <div>
+    <div class="p52-nav lbl" style="margin:0;">${P52_MESES[month]} ${year}</div>
+    <div class="p52-nav sub" style="margin:0;">${daysInMonth} dias · ${atvs.length} atividades no filtro</div>
+  </div>
+  <button class="nav-btn" onclick="p52MonthOffset++;p52RenderMonth()">›</button>
+  <button class="btn secondary" style="padding:5px 10px;font-size:12px;" onclick="p52MonthOffset=0;p52RenderMonth()">Hoje</button>
+</div>
+<div class="p52-prog">
+  <div class="prog-lbl">${P52_MESES[month]} · execução</div>
+  <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+  <div class="prog-pct">${pct}%</div>
+</div>
+<div class="p52-month-grid">`;
+
+  for(const area of areas){
+    const areaAtvs=atvs.filter(a=>a.area===area).slice(0,8);
+    if(!areaAtvs.length) continue;
+    html+=`<div class="p52-month-card"><div class="p52-month-card-head">${area}</div>`;
+    for(const atv of areaAtvs){
+      let exec=0,total=0,mini='';
+      for(let d=1;d<=daysInMonth;d++){
+        const dt=new Date(year,month,d);
+        const ds=p52DateStr(dt);
+        const isFut=dt>today;
+        const isTod=ds===p52DateStr(today);
+        if(!p52IsPlanned(atv,dt)){mini+=`<div class="p52-mini-d" style="background:var(--panel-2);opacity:.3;"></div>`;continue;}
+        total++;
+        const st=statuses[ds]?.[atv.id]?.status||((isFut||isTod)?'PE':'NR');
+        if(st==='E') exec++;
+        const bg={E:'var(--ok)',PE:'var(--amber)',NR:'var(--bad)',R:'#a78bfa'}[st]||'var(--panel-2)';
+        const op=isFut?'opacity:.5;':'';
+        mini+=`<div class="p52-mini-d" style="background:${bg};${op}" title="${d}/${month+1}: ${st}"></div>`;
+      }
+      const epct=total>0?Math.round(exec/total*100):0;
+      const bcolor=epct>=90?'var(--ok)':epct>=60?'var(--amber)':'var(--bad)';
+      html+=`<div class="p52-month-row">
+        <div class="p52-month-atv">${atv.atividade}</div>
+        <div>
+          <div class="p52-mini-bar">${mini}</div>
+          <div style="margin-top:3px;font-size:11px;font-weight:700;color:${bcolor};">${total>0?epct+'%':'—'}</div>
+        </div>
+      </div>`;
+    }
+    html+='</div>';
+  }
+  html+='</div>';
+  cont.innerHTML=html;
+}
+
+// ── VISÃO ANUAL ───────────────────────────────────────────────
+
+async function p52RenderAnnual(){
+  const cont=document.getElementById('p52ViewContainer');
+  const today=p52Today();
+  let atvs=p52Atividades;
+  if(p52Filters.area) atvs=atvs.filter(a=>a.area===p52Filters.area);
+  if(p52Filters.freq) atvs=atvs.filter(a=>a.freq===p52Filters.freq);
+
+  let html=`
+<div class="p52-nav" style="margin-bottom:14px;">
+  <div class="p52-nav lbl" style="margin:0;">2026 — Visão Anual</div>
+</div>
+<div class="p52-annual-wrap"><table class="p52-annual-table"><thead><tr>
+  <th class="col-l">Área</th><th class="col-atv">Atividade</th>`;
+
+  const MESES_ABREV=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  MESES_ABREV.forEach(m=>html+=`<th>${m}</th>`);
+  html+=`</tr></thead><tbody>`;
+
+  const areas=[...new Set(atvs.map(a=>a.area))];
+  for(const area of areas){
+    const areaAtvs=atvs.filter(a=>a.area===area);
+    areaAtvs.forEach((atv,ai)=>{
+      html+=`<tr>`;
+      if(ai===0) html+=`<td class="col-l" rowspan="${areaAtvs.length}" style="font-weight:700;color:var(--teal-bright);vertical-align:top;padding-top:10px;">${area}</td>`;
+      html+=`<td class="col-atv">${atv.atividade}</td>`;
+      for(let m=0;m<12;m++){
+        const daysInM=new Date(2026,m+1,0).getDate();
+        let plan=0,exec=0;
+        for(let d=1;d<=daysInM;d++){
+          const dt=new Date(2026,m,d);
+          if(dt>today) continue;
+          if(!p52IsPlanned(atv,dt)) continue;
+          const ds=p52DateStr(dt);
+          plan++;
+          if(p52StatusCache[ds]?.[atv.id]?.status==='E') exec++;
+        }
+        const pct=plan>0?Math.round(Math.min(exec,plan)/plan*100):0;
+        const isFut=new Date(2026,m,1)>today;
+        let bg,color;
+        if(isFut||plan===0){bg='var(--panel-2)';color='var(--text-dim)';}
+        else if(pct>=90){bg='rgba(76,175,110,.2)';color='var(--ok)';}
+        else if(pct>=60){bg='rgba(227,179,65,.15)';color='var(--amber)';}
+        else{bg='rgba(217,106,90,.18)';color='var(--bad)';}
+        html+=`<td><div class="p52-ann-cell" style="background:${bg};color:${color};">${isFut||plan===0?'—':pct+'%'}</div></td>`;
+      }
+      html+=`</tr>`;
+    });
+  }
+  html+=`</tbody></table></div>`;
+  cont.innerHTML=html;
+}
+
+// ── CONTEXT MENU (clique na célula) ──────────────────────────
+
+function p52CellClick(e, atvId, ds, currentStatus, atvName, resp, respTs){
+  e.stopPropagation();
+  const ctx = document.getElementById('p52CtxMenu');
+  if(!ctx) return;
+
+  const options = [
+    {label:'✅  Marcar como Executado (E)', status:'E'},
+    {label:'⏳  Marcar como Pendente (PE)', status:'PE'},
+    {label:'❌  Marcar como Não Realizado (NR)', status:'NR'},
+    {label:'🔄  Marcar como Reprogramado (R)', status:'R'},
+  ];
+
+  let respHtml = '';
+  if(resp){
+    let quando = '';
+    if(respTs){
+      const dtObj = /^\d+$/.test(respTs) ? new Date(parseInt(respTs)) : new Date(respTs);
+      if(!isNaN(dtObj.getTime())) quando = ' em '+fmtBR(dtObj)+' '+fmtTime(dtObj.getTime());
+    }
+    respHtml = `<div style="padding:8px 14px;font-size:11.5px;color:var(--teal-bright);border-bottom:1px solid var(--line);">👤 ${resp}${quando}</div>`;
+  }
+
+  ctx.innerHTML = `<div style="padding:8px 14px;font-size:11px;color:var(--text-dim);font-weight:700;border-bottom:1px solid var(--line);">${atvName}</div>`
+    + respHtml
+    + options.filter(o=>o.status!==currentStatus).map(o=>
+        `<button onclick="p52SetStatus('${atvId}','${ds}','${o.status}',true)">${o.label}</button>`
+      ).join('')
+    + `<div class="ctx-sep"></div><button style="color:var(--text-dim);" onclick="document.getElementById('p52CtxMenu').style.display='none'">Fechar</button>`;
+
+  const x=Math.min(e.clientX, window.innerWidth-200);
+  const y=Math.min(e.clientY+8, window.innerHeight-200);
+  ctx.style.left=x+'px'; ctx.style.top=y+'px'; ctx.style.display='block';
+}
+
+async function p52SetStatus(atvId, ds, status, manual){
+  const statusDay = await p52LoadStatusDay(ds);
+  statusDay[atvId] = {status, resp: manual?'(manual)':'', ts: new Date().toISOString(), manual:!!manual};
+  await p52SaveStatusDay(ds, statusDay);
+  p52StatusCache[ds] = statusDay;
+  document.getElementById('p52CtxMenu').style.display='none';
+  p52RenderCurrent();
+}
+
+// ── ATUALIZAÇÃO VIA NOVO EXCEL ────────────────────────────────
+
+function p52ShowUpdateModal(){
+  const isAdminNow = document.getElementById('navAdmin')?.classList.contains('active');
+  if(!isAdminNow){ alert('Apenas administradores podem atualizar o plano.'); return; }
+  const modal = document.createElement('div');
+  modal.id = 'p52UpdateModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML=`
+<div style="background:var(--panel);border:1px solid var(--teal);border-radius:16px;padding:32px;max-width:500px;width:90%;text-align:center;">
+  <div style="font-size:32px;margin-bottom:12px;">🔄</div>
+  <h3 style="margin-bottom:8px;">Atualizar Plano via Excel</h3>
+  <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;line-height:1.6;">
+    Selecione o novo arquivo Excel. O histórico de execuções <strong>não será apagado</strong>.<br>
+    Planejamentos futuros serão atualizados e novas áreas adicionadas.
+  </p>
+  <input type="file" id="p52UpdateFile" accept=".xlsx" style="display:none">
+  <button class="btn" onclick="document.getElementById('p52UpdateFile').click()" style="margin-bottom:12px;padding:12px 28px;">📂 Selecionar novo Excel</button>
+  <br><button class="btn secondary" onclick="document.getElementById('p52UpdateModal').remove()">Cancelar</button>
+  <div id="p52UpdateStatus" style="margin-top:14px;"></div>
+</div>`;
+  document.body.appendChild(modal);
+  document.getElementById('p52UpdateFile').addEventListener('change', async e=>{
+    if(!e.target.files[0]) return;
+    const upd = document.getElementById('p52UpdateStatus');
+    upd.innerHTML=`<div style="font-size:13px;color:var(--text-dim);">Lendo arquivo…</div>`;
+    try{
+      const {ws}=await p52ParseExcel(e.target.files[0]);
+      const {atividades:newAtvs}=p52ExtractFromSheet(ws);
+      const oldIds=new Set(p52Atividades.filter(a=>a.fonte==='excel').map(a=>a.id));
+      const newIds=new Set(newAtvs.map(a=>a.id));
+      const added=newAtvs.filter(a=>!oldIds.has(a.id)).length;
+      const removed=[...oldIds].filter(id=>!newIds.has(id)).length;
+      const unchanged=newAtvs.filter(a=>oldIds.has(a.id)).length;
+      window._p52PendingUpdate = newAtvs;
+      upd.innerHTML=`
+<div style="background:var(--panel-2);border-radius:8px;padding:14px;text-align:left;margin-bottom:14px;">
+  <div style="font-size:13px;margin-bottom:6px;color:var(--ok);">✅ Novos: <strong>${added}</strong> atividades</div>
+  <div style="font-size:13px;margin-bottom:6px;color:var(--bad);">🗑 Removidos do plano: <strong>${removed}</strong></div>
+  <div style="font-size:13px;color:var(--text-dim);">— Sem alteração: <strong>${unchanged}</strong></div>
+</div>
+<button class="btn" style="background:var(--ok);color:#06210f;width:100%;" onclick="p52ApplyUpdate()">Aplicar atualização</button>`;
+    }catch(err){
+      upd.innerHTML=`<div style="color:var(--bad);">Erro: ${err.message}</div>`;
+    }
+  });
+}
+
+async function p52ApplyUpdate(){
+  const newAtvs = window._p52PendingUpdate || [];
+  const extras = p52Atividades.filter(a=>a.fonte==='extra');
+  const all = [...newAtvs, ...extras];
+  await p52SaveAtividades(all);
+  p52Atividades = all;
+  const meta = {importedAt:new Date().toISOString(), totalAtv:all.length, version:(p52Meta?.version||1)+1};
+  await p52SaveMeta(meta);
+  p52Meta=meta;
+  document.getElementById('p52UpdateModal')?.remove();
+  renderP52Main();
+}
+
+// ── WIRE NAV ─────────────────────────────────────────────────
+setTimeout(()=>{
+  const nav52 = document.getElementById('nav52');
+  if(nav52){
+    nav52.addEventListener('click',()=>{
+      section='p52sem';
+      document.querySelectorAll('.mainnav button').forEach(b=>b.classList.remove('active'));
+      nav52.classList.add('active');
+      renderTopControls();
+      renderP52();
+    });
+  }
+}, 0);
 
 </script>
 </body>
