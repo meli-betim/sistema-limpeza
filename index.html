@@ -88,6 +88,23 @@
 
   .turn-head{ padding:14px 16px !important; font-size:14px !important; }
 
+  /* Busca fixa (sticky) durante a rolagem — fundo sólido para não deixar
+     o conteúdo por trás atrapalhar a leitura. Fica logo abaixo do topbar
+     mobile (~52px de altura). */
+  .search-sticky-row{
+    position:sticky;
+    top:52px;
+    z-index:150;
+    background:var(--bg);
+    padding:10px 0 12px !important;
+    margin-bottom:6px !important;
+    margin-left:-14px;
+    margin-right:-14px;
+    padding-left:14px !important;
+    padding-right:14px !important;
+    border-bottom:1px solid var(--line);
+  }
+
   /* NÃO esconder #topControls por completo — ele contém navegação de data
      essencial (‹ ›, Hoje, Dia/Semana, datepicker do Efetivo). Apenas
      reorganiza para caber confortavelmente abaixo do cabeçalho. */
@@ -1105,6 +1122,25 @@ async function renderDay(){
   // Isso respeita automaticamente a virada de meia-noite do ciclo T*N,
   // pois occDeadline() já soma 1 dia internamente via getShiftWindow().
   const agora = actualDateTimeBRT();
+  // ── Ordem de renderização (visual apenas) ──────────────────────────────
+  // Em telas mobile, depois das 19:00 o turno noturno (T*N) deve aparecer
+  // primeiro na tela, para reduzir rolagem. Isso NÃO altera 'turns' (usado
+  // em todos os cálculos de dados) — é só a ordem em que os cards/barras
+  // são desenhados. No desktop a ordem nunca muda.
+  const isMobileViewport = window.matchMedia('(max-width:767px)').matches;
+  const nowHourBRT = actualDateTimeBRT().getHours();
+  const isNoturnoPriority = isMobileViewport && nowHourBRT >= 19;
+  function sortByNoturnoFirst(arr, keyFn){
+    if(!isNoturnoPriority) return arr;
+    return [...arr].sort((a,b)=>{
+      const ka = keyFn(a), kb = keyFn(b);
+      const aNight = (ka==='T1N'||ka==='T2N') ? 0 : 1;
+      const bNight = (kb==='T1N'||kb==='T2N') ? 0 : 1;
+      return aNight - bNight;
+    });
+  }
+  const renderOrder = sortByNoturnoFirst(turns, t=>t.key);
+
   const turnStats = turns.map(t=>{
     let total=0, done=0, esperado=0, realizado=0;
     dayLocations.forEach(loc=>{
@@ -1135,12 +1171,13 @@ async function renderDay(){
     }
     return {key:t.key, total, done, turnPct, barColor};
   });
+  const turnStatsOrdered = sortByNoturnoFirst(turnStats, ts=>ts.key);
 
   let html = `
     <div class="progress-bar-outer" style="flex-direction:column;align-items:stretch;gap:12px;">
       <div class="label" style="min-width:0;">${['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'][currentDate.getDay()]+', '+fmtBR(currentDate)} — progresso do dia</div>
       <div style="display:flex;gap:16px;flex-wrap:wrap;">
-        ${turnStats.map(ts => `
+        ${turnStatsOrdered.map(ts => `
           <div style="flex:1;min-width:200px;display:flex;align-items:center;gap:10px;">
             <span style="font-size:12px;color:var(--text-dim);min-width:64px;font-weight:600;">${TURN_NAMES[ts.key]}</span>
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${ts.turnPct}%;background:${ts.barColor};"></div></div>
@@ -1151,7 +1188,7 @@ async function renderDay(){
     </div>
 
     <!-- lupa / filtro -->
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+    <div class="search-sticky-row" style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
       <div class="lsearch-wrap">
         <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--text-dim);pointer-events:none;z-index:1;">🔍</span>
         <input type="text" id="locSearch" placeholder="Buscar local..." autocomplete="off"
@@ -1169,7 +1206,7 @@ async function renderDay(){
     <div class="turn-grid" id="turnGrid">
   `;
 
-  turns.forEach(t=>{
+  renderOrder.forEach(t=>{
     const tc = TURN_COLORS[t.key];
     html += `<div class="turn-card" data-turn="${t.key}" style="border-color:${tc.accent}33;">
       <div class="turn-head" style="background:${tc.head};border-bottom-color:${tc.accent}44;">
