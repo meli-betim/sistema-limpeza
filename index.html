@@ -1855,6 +1855,8 @@ function reqCardHtml(r, showActions){
     : '';
   const closedLine = r.status==='concluida' && r.closedAt
     ? `<span>Concluída em: <strong>${fmtBRTime(new Date(r.closedAt))}</strong>${r.closedBy?' por '+r.closedBy:''}</span>` : '';
+  const motivoLine = r.concluidoAutomaticamente && r.motivoConclusao
+    ? `<div style="font-size:12px;color:var(--amber);margin-top:4px;font-weight:600;">🕓 ${r.motivoConclusao}</div>` : '';
 
   const actions = showActions ? `
     <div class="req-actions">
@@ -1908,6 +1910,7 @@ function reqCardHtml(r, showActions){
       ${assignLine}
       ${closedLine}
     </div>
+    ${motivoLine}
     ${actions}
   </div>`;
 }
@@ -2110,6 +2113,13 @@ async function renderRequests(){
           <label>Data da ocorrência <span style="font-size:11px;color:var(--text-dim);font-weight:400;">(somente Admin — permite lançamento retroativo)</span></label>
           <input type="date" id="reqDataOcorrencia" value="${dateStr(nowBRT())}" max="${dateStr(nowBRT())}">
           <div id="reqRetroativoAviso" style="display:none;font-size:12px;color:var(--amber);margin-top:4px;">⚠ Lançamento retroativo — esta ocorrência será contabilizada na data selecionada.</div>
+          <div id="reqConcluirAutoRow" style="display:none;margin-top:10px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);font-weight:400;cursor:pointer;">
+              <input type="checkbox" id="reqConcluirAuto" style="width:16px;height:16px;cursor:pointer;">
+              Concluir automaticamente
+            </label>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">Encerra o lançamento retroativo imediatamente, com SLA zerado (não gera impacto no indicador).</div>
+          </div>
         </div>` : ''}
         <div class="form-row"><label>Foto (opcional)</label>
           <input type="file" id="reqFoto" accept="image/*" capture="environment">
@@ -2196,14 +2206,21 @@ async function renderRequests(){
       }
     });
 
-    // Aviso visual "Lançamento retroativo" — só existe quando o campo de
-    // data existe (admin + desktop). Atualiza ao trocar a data escolhida.
+    // Aviso visual "Lançamento retroativo" e opção "Concluir automaticamente"
+    // — só existem quando o campo de data existe (admin + desktop).
+    // A opção de concluir automaticamente só aparece quando a data
+    // selecionada é de fato retroativa (não faz sentido em datas normais).
     const dataOcorrenciaEl = document.getElementById('reqDataOcorrencia');
     if(dataOcorrenciaEl){
       const avisoEl = document.getElementById('reqRetroativoAviso');
+      const concluirAutoRowEl = document.getElementById('reqConcluirAutoRow');
+      const concluirAutoCheckEl = document.getElementById('reqConcluirAuto');
       const hojeStr = dateStr(nowBRT());
       const atualizarAviso = ()=>{
-        avisoEl.style.display = (dataOcorrenciaEl.value && dataOcorrenciaEl.value < hojeStr) ? 'block' : 'none';
+        const isRetroativo = dataOcorrenciaEl.value && dataOcorrenciaEl.value < hojeStr;
+        avisoEl.style.display = isRetroativo ? 'block' : 'none';
+        concluirAutoRowEl.style.display = isRetroativo ? 'block' : 'none';
+        if(!isRetroativo && concluirAutoCheckEl) concluirAutoCheckEl.checked = false; // limpa se voltar pra data normal
       };
       dataOcorrenciaEl.addEventListener('change', atualizarAviso);
       atualizarAviso();
@@ -2264,6 +2281,31 @@ async function renderRequests(){
           usuarioLancamento: currentUser?.nome || currentEmployee || ''
         } : {})
       };
+
+      // ── Conclusão automática de lançamento retroativo (somente Admin) ──
+      // Validação real: só tem efeito se retroativo===true (já validado
+      // acima, via isAdmin) E isAdmin===true neste momento. Mesmo que um
+      // usuário comum manipule o checkbox via DOM/console, esta condição
+      // bloqueia a ação — a permissão nunca depende só da interface.
+      const concluirAutoCheckEl = document.getElementById('reqConcluirAuto');
+      const concluirAutomaticamente = retroativo && isAdmin && concluirAutoCheckEl && concluirAutoCheckEl.checked;
+
+      if(concluirAutomaticamente){
+        // SLA zerado: closedAt = createdAt faz (closedAt - createdAt) = 0
+        // em TODAS as fórmulas de SLA já existentes no sistema (painel,
+        // relatório, indicadores) — sem precisar alterar nenhuma delas,
+        // pois todas usam essa mesma subtração para medir o tempo de
+        // atendimento. Não há impacto negativo possível: o resultado é
+        // sempre exatamente zero, independente de quantos dias se passaram
+        // desde a data retroativa até agora.
+        obj.status = 'concluida';
+        obj.closedAt = obj.createdAt;
+        obj.closedBy = currentUser?.nome || currentEmployee || '';
+        obj.assignee = obj.closedBy; // conclusão exige responsável — usa o próprio admin
+        obj.motivoConclusao = 'Conclusão de lançamento retroativo, sem impacto no SLA';
+        obj.concluidoAutomaticamente = true;
+      }
+
       await saveRequest(id, obj);
 
       // vai direto pro painel
