@@ -3063,6 +3063,14 @@ async function renderReportRequests(){
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:11px;color:var(--text-dim);">Data específica (de)</label>
+        <input type="date" id="reqFilterDataDe" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:11px;color:var(--text-dim);">Data específica (até)</label>
+        <input type="date" id="reqFilterDataAte" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
         <label style="font-size:11px;color:var(--text-dim);">Tipo de ocorrência</label>
         <select id="reqFilterTipo" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;font-family:inherit;">
           ${tipoOptions}
@@ -3190,16 +3198,38 @@ async function renderReportRequests(){
   content.innerHTML=html;
 
   // Wire filters
+  document.getElementById('reqFilterClear')?.addEventListener('click', ()=>{
+    document.getElementById('reqFilterMonth').value = '';
+    document.getElementById('reqFilterDataDe').value = '';
+    document.getElementById('reqFilterDataAte').value = '';
+    document.getElementById('reqFilterTipo').value = '';
+    document.getElementById('reqFilterPrio').value = '';
+  });
+
   document.getElementById('reqFilterApply')?.addEventListener('click', ()=>{
     const fMonth = document.getElementById('reqFilterMonth').value;
+    const fDataDe = document.getElementById('reqFilterDataDe').value;
+    const fDataAte = document.getElementById('reqFilterDataAte').value;
     const fTipo  = document.getElementById('reqFilterTipo').value;
     const fPrio  = document.getElementById('reqFilterPrio').value;
 
     // Se nenhum filtro selecionado, não faz nada
-    if(!fMonth && !fTipo && !fPrio) return;
+    if(!fMonth && !fDataDe && !fDataAte && !fTipo && !fPrio) return;
 
     let filtered = all;
-    if(fMonth){ const [y,mo]=fMonth.split('-'); filtered=filtered.filter(r=>{ const d=new Date(r.createdAt); return d.getFullYear()==y&&(d.getMonth()+1)==mo; }); }
+
+    // Data específica tem prioridade sobre o filtro de mês, pois é mais
+    // granular. Preencher só "De" filtra um único dia; preencher "De" e
+    // "Até" filtra o intervalo completo (inclusive as duas pontas).
+    if(fDataDe || fDataAte){
+      const [dY,dM,dD] = (fDataDe || fDataAte).split('-').map(Number);
+      const startTs = new Date(dY, dM-1, dD, 0,0,0,0).getTime();
+      const [aY,aM,aD] = (fDataAte || fDataDe).split('-').map(Number);
+      const endTs = new Date(aY, aM-1, aD, 23,59,59,999).getTime();
+      filtered = filtered.filter(r=>r.createdAt>=startTs && r.createdAt<=endTs);
+    } else if(fMonth){
+      const [y,mo]=fMonth.split('-'); filtered=filtered.filter(r=>{ const d=new Date(r.createdAt); return d.getFullYear()==y&&(d.getMonth()+1)==mo; });
+    }
     if(fTipo)  filtered=filtered.filter(r=>(r.tipo||'Não informado')===fTipo);
     if(fPrio)  filtered=filtered.filter(r=>r.prio===fPrio);
 
@@ -3228,7 +3258,7 @@ async function renderReportRequests(){
 
     // Descrição dos filtros ativos
     const filtrosAtivos = [
-      fMonth ? `Mês: ${fMonth}` : '',
+      (fDataDe || fDataAte) ? `Data: ${fDataDe && fDataAte && fDataDe!==fDataAte ? fmtBR(new Date(fDataDe+'T00:00:00'))+' a '+fmtBR(new Date(fDataAte+'T00:00:00')) : fmtBR(new Date((fDataDe||fDataAte)+'T00:00:00'))}` : (fMonth ? `Mês: ${fMonth}` : ''),
       fTipo  ? `Tipo: ${fTipo}` : '',
       fPrio  ? `Prioridade: ${fPrio==='alta'?'Urgente':'Normal'}` : '',
     ].filter(Boolean).join(' · ');
