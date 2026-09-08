@@ -2105,6 +2105,12 @@ async function renderRequests(){
         </div>
         <div class="form-row"><label>Descreva a solicitação</label>
           <textarea id="reqDesc" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
+        ${(isAdmin && !document.body.classList.contains('kiosk') && window.matchMedia('(min-width:768px)').matches) ? `
+        <div class="form-row" id="reqDataOcorrenciaRow">
+          <label>Data da ocorrência <span style="font-size:11px;color:var(--text-dim);font-weight:400;">(somente Admin — permite lançamento retroativo)</span></label>
+          <input type="date" id="reqDataOcorrencia" value="${dateStr(nowBRT())}" max="${dateStr(nowBRT())}">
+          <div id="reqRetroativoAviso" style="display:none;font-size:12px;color:var(--amber);margin-top:4px;">⚠ Lançamento retroativo — esta ocorrência será contabilizada na data selecionada.</div>
+        </div>` : ''}
         <div class="form-row"><label>Foto (opcional)</label>
           <input type="file" id="reqFoto" accept="image/*" capture="environment">
           <div id="reqFotoPreview" style="margin-top:8px;"></div>
@@ -2190,6 +2196,19 @@ async function renderRequests(){
       }
     });
 
+    // Aviso visual "Lançamento retroativo" — só existe quando o campo de
+    // data existe (admin + desktop). Atualiza ao trocar a data escolhida.
+    const dataOcorrenciaEl = document.getElementById('reqDataOcorrencia');
+    if(dataOcorrenciaEl){
+      const avisoEl = document.getElementById('reqRetroativoAviso');
+      const hojeStr = dateStr(nowBRT());
+      const atualizarAviso = ()=>{
+        avisoEl.style.display = (dataOcorrenciaEl.value && dataOcorrenciaEl.value < hojeStr) ? 'block' : 'none';
+      };
+      dataOcorrenciaEl.addEventListener('change', atualizarAviso);
+      atualizarAviso();
+    }
+
     document.getElementById('reqSubmit').addEventListener('click', async ()=>{
       const nome = document.getElementById('reqNome').value.trim();
       let local = document.getElementById('reqLocal').value;
@@ -2206,7 +2225,45 @@ async function renderRequests(){
       }
 
       const id=genTicketId(), now=Date.now();
-      const obj={id,nome,local,tipo,desc,prio,status:'aberta',createdAt:now,updatedAt:now,foto:reqFotoDataUrl||null};
+      let createdAt = now;
+      let retroativo = false;
+      let dataLancamentoReal = null;
+
+      // ── Lançamento retroativo — somente Admin, somente Desktop ──────
+      // Validação real (não confia só em o campo existir na tela): mesmo
+      // que alguém manipule o HTML/DOM para inserir o campo, a gravação
+      // só aceita data retroativa se isAdmin for verdadeiro NESTE momento.
+      // isAdmin é controlado pelo login (PIN de admin), não pela interface.
+      const dataOcorrenciaInput = document.getElementById('reqDataOcorrencia');
+      if(dataOcorrenciaInput && dataOcorrenciaInput.value && isAdmin){
+        const [y,m,d] = dataOcorrenciaInput.value.split('-').map(Number);
+        const dataEscolhida = new Date(y, m-1, d);
+        const hoje = nowBRT(); hoje.setHours(0,0,0,0);
+        if(dataEscolhida.getTime() !== hoje.getTime()){
+          // Preserva a hora atual (não zera para 00:00), só troca o dia/mês/ano —
+          // assim a ocorrência cai no dia certo sem perder granularidade de horário
+          // nos cálculos que dependem de Date.now() normalmente.
+          const agora = new Date(now);
+          dataEscolhida.setHours(agora.getHours(), agora.getMinutes(), agora.getSeconds(), agora.getMilliseconds());
+          createdAt = dataEscolhida.getTime();
+          retroativo = true;
+          dataLancamentoReal = now; // preserva quando o registro foi de fato criado, para auditoria
+        }
+      }
+
+      const obj={
+        id, nome, local, tipo, desc, prio, status:'aberta',
+        createdAt, updatedAt:now, foto:reqFotoDataUrl||null,
+        // Campos de auditoria — só preenchidos quando é retroativo; em
+        // lançamentos normais ficam ausentes, sem alterar a estrutura
+        // usada pelo restante do sistema (createdAt continua sendo o
+        // único campo que os indicadores/relatórios já leem).
+        ...(retroativo ? {
+          retroativo: true,
+          dataLancamentoReal,
+          usuarioLancamento: currentUser?.nome || currentEmployee || ''
+        } : {})
+      };
       await saveRequest(id, obj);
 
       // vai direto pro painel
