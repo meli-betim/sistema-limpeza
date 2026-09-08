@@ -305,8 +305,28 @@
 
 <script>
 (function(){
+  // Detecta modo kiosk (acesso direto via ?tab=requests ou ?kiosk=1) usando
+  // a mesma condição já usada em todo o resto do sistema (ver _isKioskEarly
+  // e o bloco isKioskFast dentro do IIFE de inicialização). Repetida aqui,
+  // em vez de depender de _isKioskEarly, porque este script roda ANTES
+  // daquela variável ser declarada mais abaixo no arquivo.
+  const _params = new URLSearchParams(window.location.search);
+  const _isKiosk = _params.get('tab')==='requests' || _params.get('kiosk')==='1';
+
   const bottomNav = document.getElementById('mobileBottomNav');
   const moreMenu = document.getElementById('mobileMoreMenu');
+
+  // Modo kiosk = acesso exclusivo à tela de Solicitação de Limpeza (sem
+  // login, usado via QR code/link direto). Nesse modo, a navegação para
+  // as demais áreas do sistema (Plano, Efetivo, Mais) NÃO deve existir —
+  // não só visualmente escondida, mas removida do DOM, então não há como
+  // ela ser acionada de forma alguma. O desktop não é afetado: ele já
+  // esconde .topbar/.mainnav via CSS (body.kiosk) e nunca teve essa barra.
+  if(_isKiosk){
+    if(bottomNav) bottomNav.remove();
+    if(moreMenu) moreMenu.remove();
+    return; // não instala nenhum listener — não há nada para conectar
+  }
 
   function clickTarget(targetId){
     const el = document.getElementById(targetId);
@@ -379,7 +399,6 @@
   <div class="loading">Carregando...</div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script>
@@ -1747,6 +1766,15 @@ let _migrated = false;
 async function migrateOldRequestsIfNeeded(){
   if(_migrated) return;
   _migrated = true;
+  // Otimização de performance: a migração de dados antigos ('allreqs') só
+  // precisa rodar UMA VEZ na vida do sistema. Depois da primeira vez bem
+  // sucedida, gravamos uma marca local para nunca mais checar isso de novo
+  // nesta aba/navegador — elimina 1-2 chamadas de rede (com timeout de 5s
+  // cada) em toda visita à tela de Solicitações.
+  try{
+    const already = window.localStorage.getItem('sistemaLimpeza:migracaoSolicitacoesOk');
+    if(already === '1') return;
+  }catch(e){}
   try{
     const oldSnap = await withTimeout(fbRoot.child('allreqs').get(), 5000);
     if(oldSnap.exists()){
@@ -1760,14 +1788,19 @@ async function migrateOldRequestsIfNeeded(){
         }
       }
     }
+    try{ window.localStorage.setItem('sistemaLimpeza:migracaoSolicitacoesOk', '1'); }catch(e){}
   }catch(e){ console.error('Falha na migração de solicitações antigas', e); }
 }
 
 let _reqLoadTs=0;
 async function ensureRequestsLoaded(){
   const now=Date.now();
-  // Cache de 20s — evita múltiplas chamadas ao Firebase em sequência
-  if(_requests.length>0 && (now-_reqLoadTs)<20000) return;
+  // Cache de 60s — evita recarregar do Firebase ao trocar entre sub-abas
+  // (Pendentes/Em andamento/Concluídas), que antes buscava tudo de novo a
+  // cada clique. saveRequest()/deleteRequest() já invalidam esse cache
+  // manualmente quando os dados mudam, então continua sempre atualizado
+  // após qualquer ação do próprio usuário.
+  if(_requests.length>0 && (now-_reqLoadTs)<60000) return;
   await migrateOldRequestsIfNeeded();
   try{
     const snap = await withTimeout(fbRequestsRef.get());
@@ -2007,9 +2040,14 @@ function wireReqCard(card, onUpdate){
 }
 
 async function renderRequests(){
-  // Proteção de rota — redireciona para login se não autenticado
-  const _users = await (async()=>{ try{ const s=await window.storage.get('system:users',true); return s?JSON.parse(s.value):[]; }catch(e){return [];} })();
-  if(_users.length > 0 && !currentUser){ await renderUserLogin(); return; }
+  // Proteção de rota — redireciona para login se não autenticado.
+  // Otimização: se já sabemos quem é o usuário (currentUser em memória),
+  // não precisa buscar a lista completa de usuários de novo no Firebase
+  // toda vez que essa tela é aberta — só busca quando ainda não há sessão.
+  if(!currentUser){
+    const _users = await (async()=>{ try{ const s=await window.storage.get('system:users',true); return s?JSON.parse(s.value):[]; }catch(e){return [];} })();
+    if(_users.length > 0){ await renderUserLogin(); return; }
+  }
 
   const app = document.getElementById('app');
   app.innerHTML = `<div class="req-tabs">
@@ -3886,6 +3924,9 @@ function kSwitchTab(tab){
   // Modo kiosk (mobile): carrega apenas o necessário — ignora sessão admin
   if(isKioskFast){
     document.body.classList.add('kiosk');
+    // O seletor de turno T1/T2 do cabeçalho é específico do Plano de Limpeza,
+    // que não existe nesse modo (acesso isolado à Solicitação de Limpeza).
+    document.getElementById('headerTurnSelector')?.remove();
     try{ await renderKiosk(); } catch(e){ console.error('Kiosk error:',e); }
     hideLoader();
     return;
@@ -4196,6 +4237,181 @@ async function renderEfetivo(){
     return {totalPrev,totalReal,deficit,ader};
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // RELATÓRIO MENSAL DE EFETIVO — exportação para Excel
+  // ════════════════════════════════════════════════════════════════════
+  // Reaproveita EXATAMENTE a mesma fonte de dados e fórmula de aderência
+  // de buildConsolidado() acima — nenhuma base nova, nenhum cálculo novo.
+  // A diferença é que aqui guardamos o detalhe de CADA dia/turno, em vez
+  // de só o total agregado do mês.
+  const DIAS_SEMANA_PT = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+
+  async function coletarEfetivoDiario(ano, mes){
+    const diasNoMes = new Date(ano, mes, 0).getDate();
+    const days = Array.from({length:diasNoMes}, (_,i)=>new Date(ano, mes-1, i+1));
+    const results = await Promise.all(days.map(d=>loadEfetivo(dateStr(d))));
+
+    const linhas = [];
+    let totalPrevGeral=0, totalRealGeral=0;
+    const porTurno = {}; // agrega por chave de turno normalizada (T1/T2), como já é exibido na tela
+
+    for(let i=0;i<diasNoMes;i++){
+      const d = days[i];
+      const ddata = results[i];
+      // MESMA lógica de buildConsolidado(): turnos ativos do dia sempre vêm
+      // de _turnos (se já registrado) ou de activeTurns(date) como fallback.
+      // Isso garante que o TOTAL do mês bata exatamente com o que a tela
+      // mostra em "Calcular" — a tela sempre conta o planejado do dia,
+      // mesmo quando não houve lançamento algum naquele dia.
+      const turnos = ddata._turnos || activeTurns(d).map(t=>t.key);
+
+      for(const tk of turnos){
+        const previsto = TURNO_PREVISTO[tk] || 0;
+        const lista = ddata[tk];
+        // Mesma expressão exata usada em buildConsolidado(): (ddata[tk]||[]).length
+        const praticado = (lista||[]).length;
+        const houveLancamentoNesteTurno = Array.isArray(lista);
+        // Nomes dos colaboradores lançados naquele turno — mesmo dado já
+        // salvo pelo lançamento diário (campo 'nome' de cada item da lista),
+        // nenhuma informação nova, só reaproveitando o que já existe.
+        const nomes = (lista||[]).map(p=>p.nome).filter(Boolean);
+
+        const grupo = (tk==='T1D'||tk==='T1N') ? 'T1' : 'T2';
+        if(!porTurno[grupo]) porTurno[grupo] = {planejado:0, praticado:0};
+
+        // Soma sempre o planejado (igual à tela) e o praticado real (0 se
+        // não houve lançamento) — reproduz fielmente o total consolidado.
+        totalPrevGeral += previsto;
+        totalRealGeral += praticado;
+        porTurno[grupo].planejado += previsto;
+        porTurno[grupo].praticado += praticado;
+
+        const aderencia = previsto>0 ? (praticado/previsto*100) : null;
+
+        linhas.push({
+          data: d,
+          turnoLabel: TURNO_LABELS[tk] || tk,
+          turnoGrupo: grupo,
+          planejado: previsto,
+          praticado: praticado,
+          aderencia: aderencia,
+          nomes: nomes,
+          // Indicador informativo (não afeta os totais): distingue visualmente
+          // no relatório os dias em que realmente não houve nenhum lançamento,
+          // sem deixar de contabilizá-los no resumo — igual ao comportamento
+          // já existente na tela de Efetivo.
+          semLancamento: !houveLancamentoNesteTurno
+        });
+      }
+    }
+
+    const aderenciaMensal = totalPrevGeral>0 ? (totalRealGeral/totalPrevGeral*100) : null;
+    const diasComDesvio = linhas.filter(l=>l.praticado!==l.planejado).length;
+
+    return { linhas, totalPrevGeral, totalRealGeral, aderenciaMensal, porTurno, diasComDesvio };
+  }
+
+  async function gerarRelatorioEfetivoExcel(ano, mes){
+    await loadXLSXIfNeeded(); // mesma biblioteca já usada pelo Plano 52 Semanas, carregada sob demanda
+    const meses2 = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const { linhas, totalPrevGeral, totalRealGeral, aderenciaMensal, porTurno, diasComDesvio } = await coletarEfetivoDiario(ano, mes);
+
+    // ── Aba "Efetivo Diário" ──────────────────────────────────────────
+    const header = ['Data','Dia da semana','Turno','Efetivo planejado','Efetivo praticado','Aderência','Colaboradores presentes'];
+    const rows = linhas.map(l=>{
+      // O planejado é sempre exibido (é o mesmo valor fixo por turno que a
+      // tela usa em TURNO_PREVISTO). Quando não houve NENHUM lançamento
+      // naquele dia/turno, o praticado mostra 0 com uma nota explícita —
+      // sem inventar valor, apenas deixando claro que ninguém foi lançado
+      // (mesmo critério que a tela já usa para contar 0 no total do mês).
+      return [
+        fmtBR(l.data),
+        DIAS_SEMANA_PT[l.data.getDay()],
+        l.turnoLabel + (l.semLancamento ? ' (sem lançamento)' : ''),
+        l.planejado,
+        l.praticado,
+        l.aderencia!==null ? (l.aderencia/100) : 'Sem lançamento', // valor fracionário p/ formatação de % no Excel
+        l.nomes && l.nomes.length ? l.nomes.join(', ') : (l.semLancamento ? '—' : ''),
+      ];
+    });
+
+    const wsData = [
+      ['RELATÓRIO DE EFETIVO — MG02'],
+      ['Mês de referência: '+meses2[mes-1]+'/'+ano],
+      [],
+      header,
+      ...rows
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Nota importante: a versão gratuita/community do SheetJS (a mesma já
+    // usada no restante do sistema) NÃO grava estilos de célula (negrito,
+    // cor de fundo) no arquivo final — esse recurso existe apenas na
+    // versão paga da biblioteca. Por isso, o destaque visual do título e
+    // do cabeçalho fica por conta do próprio texto em maiúsculas e da
+    // estrutura clara das linhas, sem prometer uma formatação que a
+    // biblioteca disponível não é capaz de produzir de verdade.
+
+    // Formata a coluna de aderência (F) como percentual nas linhas de dados
+    // — isso SIM é suportado e funciona corretamente (número + formato numérico).
+    const dataStartRow = 5; // linha 1-indexed onde começam os dados (após título+subtítulo+vazio+header)
+    rows.forEach((r, idx)=>{
+      const rowNum = dataStartRow + idx;
+      const cellRef = 'F'+rowNum;
+      if(ws[cellRef] && typeof ws[cellRef].v === 'number'){
+        ws[cellRef].z = '0.00%';
+      }
+    });
+
+    // Larguras de coluna
+    ws['!cols'] = [{wch:12},{wch:15},{wch:24},{wch:18},{wch:18},{wch:12},{wch:45}];
+    // Nota: congelamento de painel (freeze panes) também não é suportado
+    // pela versão gratuita/community do SheetJS. O recurso confiável que
+    // realmente funciona e foi aplicado é o filtro automático abaixo.
+    // filtro automático e larguras de coluna ajustadas — que já cobrem
+    // bem a usabilidade do arquivo para análise.
+    ws['!autofilter'] = {ref:'A4:G'+(dataStartRow-1+rows.length)};
+
+    // ── Aba "Resumo" ─────────────────────────────────────────────────
+    const resumoData = [
+      ['RESUMO DO MÊS'],
+      [],
+      ['Mês:', meses2[mes-1]+'/'+ano],
+      [],
+      ['Efetivo planejado total:', totalPrevGeral],
+      ['Efetivo praticado total:', totalRealGeral],
+      ['Aderência mensal:', aderenciaMensal!==null ? (aderenciaMensal/100) : 'Sem dados'],
+      [],
+    ];
+    ['T1','T2'].forEach(grupo=>{
+      const g = porTurno[grupo] || {planejado:0, praticado:0};
+      const aderG = g.planejado>0 ? (g.praticado/g.planejado) : null;
+      resumoData.push([grupo+':']);
+      resumoData.push(['Planejado:', g.planejado]);
+      resumoData.push(['Praticado:', g.praticado]);
+      resumoData.push(['Aderência:', aderG!==null ? aderG : 'Sem dados']);
+      resumoData.push([]);
+    });
+    resumoData.push(['Dias com desvio:', diasComDesvio]);
+
+    const wsResumo = XLSX.utils.aoa_to_sheet(resumoData);
+    // Formata células de aderência (linha 7 = aderência mensal, e as por-turno)
+    [7, 12, 17].forEach(rowNum=>{ // linhas aproximadas das aderências (mensal, T1, T2)
+      const ref = 'B'+rowNum;
+      if(wsResumo[ref] && typeof wsResumo[ref].v === 'number' && wsResumo[ref].v <= 1){
+        wsResumo[ref].z = '0.00%';
+      }
+    });
+    wsResumo['!cols'] = [{wch:24},{wch:16}];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Efetivo Diário');
+    XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo');
+
+    const nomeArquivo = `Relatorio_Efetivo_${meses2[mes-1]}_${ano}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+  }
+
   const meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const anoAtual=currentDate.getFullYear(), mesAtual=currentDate.getMonth()+1;
   const mesOpts=Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===mesAtual?'selected':''}>${meses[i]}</option>`).join('');
@@ -4229,6 +4445,7 @@ async function renderEfetivo(){
           <div><label class="lbl-base">ANO</label>
             <select id="consolAno" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:7px 12px;border-radius:8px;font-size:13px;font-family:inherit;">${anoOpts}</select></div>
           <button class="btn secondary" id="btnConsol">Calcular</button>
+          <button class="btn secondary" id="btnBaixarRelatorioEfetivo" style="border-color:var(--teal-bright);color:var(--teal-bright);">📥 Baixar relatório do mês</button>
         </div>
         <div id="consolResult">${consolPlaceholder}</div>
       </div>
@@ -4384,6 +4601,26 @@ async function renderEfetivo(){
       <div class="stat-box"><div class="num" style="color:${res.deficit>=0?'var(--ok)':'var(--bad)'};">${res.deficit>=0?'+':''}${res.deficit}</div><div class="lbl">Déficit acumulado</div></div>
       <div class="stat-box"><div class="num" style="color:${res.ader>=90?'var(--ok)':res.ader>=70?'var(--amber)':'var(--bad)'};">${res.ader?res.ader+'%':'—'}</div><div class="lbl">Aderência mensal</div></div>
     </div>`;
+  });
+
+  // Relatório mensal de efetivo (Excel) — usa o mesmo mês/ano selecionado
+  // nos campos ao lado, exatamente como o botão "Calcular" já faz.
+  document.getElementById('btnBaixarRelatorioEfetivo')?.addEventListener('click', async ()=>{
+    const btn = document.getElementById('btnBaixarRelatorioEfetivo');
+    const originalText = btn.textContent;
+    const m = parseInt(document.getElementById('consolMes').value);
+    const a = parseInt(document.getElementById('consolAno').value);
+    btn.disabled = true;
+    btn.textContent = '⏳ Gerando...';
+    try{
+      await gerarRelatorioEfetivoExcel(a, m);
+    }catch(err){
+      console.error('Erro ao gerar relatório de efetivo:', err);
+      alert('Não foi possível gerar o relatório. '+(err.message||''));
+    }finally{
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   });
 }
 
@@ -4768,7 +5005,26 @@ function p52ScheduleConsolidation(){
 
 // ── IMPORTAÇÃO DO EXCEL (SheetJS) ────────────────────────────
 
+// Carregamento sob demanda da biblioteca SheetJS (usada só para importar/
+// atualizar o Excel do Plano 52 Semanas). Antes era carregada sempre no
+// boot da página (~1MB), atrasando o carregamento inicial de TODAS as
+// telas do sistema, mesmo para quem nunca usa essa funcionalidade.
+let _xlsxLoadPromise = null;
+function loadXLSXIfNeeded(){
+  if(typeof XLSX !== 'undefined') return Promise.resolve();
+  if(_xlsxLoadPromise) return _xlsxLoadPromise;
+  _xlsxLoadPromise = new Promise((resolve, reject)=>{
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Não foi possível carregar a biblioteca de leitura de Excel. Verifique sua conexão.'));
+    document.head.appendChild(script);
+  });
+  return _xlsxLoadPromise;
+}
+
 async function p52ParseExcel(file){
+  await loadXLSXIfNeeded();
   return new Promise((resolve,reject)=>{
     const reader = new FileReader();
     reader.onload = e => {
