@@ -739,6 +739,13 @@ let turnFocus = loadTurnFocus();
 let dayCache = {};
 let currentEmployee = '';
 let isAdmin = false;
+// Lista única de tipos de ocorrência — reaproveitada no formulário de nova
+// solicitação e no modal de detalhe/edição (evita manter a lista em 2+ lugares).
+const TIPOS_OCORRENCIA = [
+  'Produtos rombidos/estourados','Limpeza geral','Reposição de copos',
+  'Recolhimento de lixo','Reposição de absorvente','Reposição de papel higiênico',
+  'Reposição de papel toalha','Reposição de sabonete','Outros'
+];
 let isSupervisor = false; // Supervisor: mesmo acesso do Operador + gestão do Efetivo (não é Admin)
 let currentUser = null; // usuário logado via PIN // modo administrador
 const ADMIN_HASH = '30599c3ffd8a494ba82e42e55c7905d5fe5026318bb305b465432925c224a58a'; // Meli@2027
@@ -1987,6 +1994,127 @@ function openCloseModal(r, onConfirm){
   });
 }
 
+/* ===================== MODAL DETALHE / EDIÇÃO DE SOLICITAÇÃO =====================
+   Aberto ao clicar numa linha da tabela do Relatório (ou em qualquer outro
+   lugar que precise mostrar o detalhe completo). Qualquer pessoa pode abrir
+   e LER a solicitação; a edição do campo "Tipo de Ocorrência" só é permitida
+   e só é validada de fato (não apenas escondida na tela) para isAdmin===true
+   no momento do salvamento — mesmo padrão de segurança já usado no restante
+   do sistema (data retroativa, conclusão em massa, etc). */
+function showReqDetailModal(r, onUpdate){
+  const existing = document.getElementById('reqDetailOverlay');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'reqDetailOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:9998;padding:16px;';
+
+  const podeEditar = isAdmin; // fonte de verdade real, checada de novo no salvamento
+
+  const tipoField = podeEditar
+    ? `<select id="reqDetailTipo" style="background:var(--panel-2);border:1px solid var(--teal);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13.5px;width:100%;">
+        ${TIPOS_OCORRENCIA.map(t=>`<option value="${t}" ${t===r.tipo?'selected':''}>${t}</option>`).join('')}
+      </select>`
+    : `<div style="font-size:14px;">${r.tipo||'—'}</div>`;
+
+  const fotoHtml = r.foto ? `<img src="${r.foto}" class="req-photo-thumb" style="max-width:220px;max-height:220px;" alt="Foto da solicitação">` : '';
+  const evidenciaHtml = r.evidencia ? `<div style="margin-top:10px;"><div style="font-size:11px;color:var(--ok);font-weight:700;margin-bottom:4px;">📷 Evidência de conclusão</div><img src="${r.evidencia}" class="req-photo-thumb" style="max-width:220px;max-height:220px;border-color:var(--ok);"></div>` : '';
+
+  overlay.innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--teal-bright);">#${r.id}</div>
+          <div style="font-size:13px;color:var(--text-dim);margin-top:2px;">${r.local}</div>
+        </div>
+        <div style="display:flex;gap:6px;">${statusBadge(r.status)}${prioBadge(r.prio)}</div>
+      </div>
+
+      <div style="margin-top:16px;display:grid;gap:12px;">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:4px;">Tipo de Ocorrência ${podeEditar?'<span style="color:var(--amber);">(editável — Admin)</span>':''}</div>
+          ${tipoField}
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:4px;">Descrição</div>
+          <div style="font-size:14px;line-height:1.5;">${r.desc||'—'}</div>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:4px;">Solicitante</div>
+          <div style="font-size:14px;">${r.nome||'—'}</div>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:4px;">Responsável</div>
+          <div style="font-size:14px;">${r.assignee||r.closedBy||'—'}</div>
+        </div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:4px;">Registrada em</div>
+            <div style="font-size:13.5px;">${fmtBRTime(new Date(r.createdAt))}</div>
+          </div>
+          ${r.closedAt ? `<div>
+            <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:4px;">Concluída em</div>
+            <div style="font-size:13.5px;color:var(--ok);">${fmtBRTime(new Date(r.closedAt))}</div>
+          </div>` : ''}
+        </div>
+        ${r.retroativo ? `<div style="font-size:12px;color:var(--amber);">⚠ Lançamento retroativo por ${r.usuarioLancamento||'—'}</div>` : ''}
+        ${fotoHtml}
+        ${evidenciaHtml}
+      </div>
+
+      <div id="reqDetailError" style="font-size:12.5px;color:var(--bad);margin-top:12px;min-height:16px;"></div>
+
+      <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end;">
+        <button class="btn secondary" id="reqDetailClose">Fechar</button>
+        ${podeEditar ? `<button class="btn" id="reqDetailSave">Salvar alterações</button>` : ''}
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  document.getElementById('reqDetailClose').addEventListener('click', ()=> overlay.remove());
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+
+  if(podeEditar){
+    document.getElementById('reqDetailSave').addEventListener('click', async ()=>{
+      // Validação real de permissão no momento do clique — não confia só
+      // no botão existir na tela (mesma checagem usada em toda a suíte de
+      // recursos administrativos deste sistema).
+      if(!isAdmin){
+        document.getElementById('reqDetailError').textContent = 'Ação restrita ao administrador.';
+        return;
+      }
+      const novoTipo = document.getElementById('reqDetailTipo').value;
+      const btn = document.getElementById('reqDetailSave');
+      btn.disabled = true;
+      btn.textContent = 'Salvando...';
+
+      const fresh = await loadRequest(r.id); // recarrega para não sobrescrever mudanças concorrentes
+      fresh.tipo = novoTipo;
+      fresh.updatedAt = Date.now();
+      fresh.tipoEditadoPor = currentUser?.nome || currentEmployee || '';
+      await saveRequest(r.id, fresh);
+
+      overlay.remove();
+      if(onUpdate) onUpdate();
+    });
+  }
+}
+
+// Conecta o clique nas linhas da tabela de Relatório de Solicitações,
+// abrindo o modal de detalhe (leitura para todos, edição do tipo só admin).
+function wireReqReportRows(container, onUpdate){
+  container.querySelectorAll('.req-report-row').forEach(row=>{
+    row.addEventListener('click', async ()=>{
+      const id = row.getAttribute('data-id');
+      const r = await loadRequest(id);
+      if(!r) return;
+      showReqDetailModal(r, onUpdate);
+    });
+  });
+}
+
 function wireReqCard(card, onUpdate){
   const id = card.getAttribute('data-id');
   card.querySelectorAll('.req-photo-thumb').forEach(img=>{
@@ -2168,14 +2296,7 @@ async function renderRequests(){
         <div class="form-row"><label>Tipo de Ocorrência <span style="color:var(--bad);">*</span></label>
           <select id="reqTipo">
             <option value="">— Selecione —</option>
-            <option value="Produtos rombidos/estourados">Produtos rombidos/estourados</option>
-            <option value="Limpeza geral">Limpeza geral</option>
-            <option value="Reposição de copos">Reposição de copos</option>
-            <option value="Recolhimento de lixo">Recolhimento de lixo</option>
-            <option value="Reposição de absorvente">Reposição de absorvente</option>
-            <option value="Reposição de papel higiênico">Reposição de papel higiênico</option>
-            <option value="Reposição de papel toalha">Reposição de papel toalha</option>
-            <option value="Outros">Outros</option>
+            ${TIPOS_OCORRENCIA.map(t=>`<option value="${t}">${t}</option>`).join('')}
           </select>
         </div>
         <div class="form-row"><label>Descreva a solicitação</label>
@@ -3123,7 +3244,7 @@ async function renderReportRequests(){
 
   function reqRow(r){
     const bg=r.status==='aberta'?'background:rgba(227,179,65,.06);':r.status==='andamento'?'background:rgba(63,214,201,.06);':'';
-    return `<tr style="${bg}">
+    return `<tr style="${bg}cursor:pointer;" class="req-report-row" data-id="${r.id}" title="Clique para ver detalhes${isAdmin?' e editar o tipo':''}">
       <td style="white-space:nowrap;"><span class="req-id">#${r.id}</span></td>
       <td>${r.local}</td>
       <td>${r.tipo||'—'}</td>
@@ -3284,6 +3405,7 @@ async function renderReportRequests(){
   html+=`<div id="reqFilterResults"></div>`;
 
   content.innerHTML=html;
+  wireReqReportRows(content, renderRequests); // linhas clicáveis: ver detalhe + editar tipo (admin)
 
   // Wire filters
   document.getElementById('reqFilterClear')?.addEventListener('click', ()=>{
@@ -3379,6 +3501,7 @@ async function renderReportRequests(){
         : '<div class="empty-state">Nenhum resultado para os filtros selecionados.</div>'
       }
     `;
+    wireReqReportRows(content, ()=>document.getElementById('reqFilterApply')?.click()); // reaplica o mesmo filtro após editar
 
     // Botão limpar volta para a tela completa
     document.getElementById('reqFilterClearResult')?.addEventListener('click', ()=>{
@@ -3894,14 +4017,7 @@ async function renderKiosk(){
         <div class="form-row"><label>Tipo de Ocorrência <span style="color:var(--bad);">*</span></label>
           <select id="kTipo">
             <option value="">— Selecione —</option>
-            <option value="Produtos rombidos/estourados">Produtos rombidos/estourados</option>
-            <option value="Limpeza geral">Limpeza geral</option>
-            <option value="Reposição de copos">Reposição de copos</option>
-            <option value="Recolhimento de lixo">Recolhimento de lixo</option>
-            <option value="Reposição de absorvente">Reposição de absorvente</option>
-            <option value="Reposição de papel higiênico">Reposição de papel higiênico</option>
-            <option value="Reposição de papel toalha">Reposição de papel toalha</option>
-            <option value="Outros">Outros</option>
+            ${TIPOS_OCORRENCIA.map(t=>`<option value="${t}">${t}</option>`).join('')}
           </select>
         </div>
         <div class="form-row"><label>Descreva a solicitação</label><textarea id="kDesc" rows="3" placeholder="Ex: Derramamento de líquido próximo à doca 3"></textarea></div>
