@@ -3964,7 +3964,7 @@ function renderChangePinModal(){
     const err     = document.getElementById('pinError');
     if(!atual||!novo||!confirm){ err.textContent='Preencha todos os campos.'; return; }
     if(atual !== currentUser?.pin){ err.textContent='PIN atual incorreto.'; return; }
-    if(!novo.length >= 4){ err.textContent='Novo PIN deve ter pelo menos 4 caracteres.'; return; }
+    if(novo.length < 4){ err.textContent='Novo PIN deve ter pelo menos 4 caracteres.'; return; }
     if(novo !== confirm){ err.textContent='Os PINs não coincidem.'; return; }
     err.textContent='';
     try{
@@ -6134,6 +6134,471 @@ setTimeout(()=>{
   }
 }, 0);
 
+</script>
+
+<!-- ===== Gravação segura + Histórico de Alterações (auditoria) ===== -->
+<script>
+/* =====================================================================
+   historico-auditoria.js — Sistema de Limpeza MG02
+   ---------------------------------------------------------------------
+   Bloco carregado DEPOIS do script principal.
+
+   O que este arquivo faz (sem remover nada do sistema atual):
+   1) Gravação segura do Plano de Limpeza: cada clique grava SOMENTE o
+      item alterado, via transação do Firebase. Evita que um celular com
+      tela desatualizada (ou com falha de carregamento) apague as
+      marcações feitas por outras pessoas no mesmo dia.
+   2) Histórico de Alterações (auditoria): todo "Marcou"/"Desmarcou" gera
+      um NOVO registro em  sistema_limpeza/auditLogs/<id gerado por push>.
+      Registros nunca são sobrescritos pela aplicação.
+   3) Nova tela administrativa "🕘 Histórico" (somente Admin), com filtros.
+   ===================================================================== */
+(function(){
+  'use strict';
+
+  const AUDIT_PATH = 'auditLogs';
+  const params = new URLSearchParams(location.search);
+  const KIOSK = params.get('tab')==='requests' || params.get('kiosk')==='1';
+
+  const clone   = o => JSON.parse(JSON.stringify(o));
+  const stateOf = v => !v ? 'pending' : (typeof v==='string' ? v : (v.state || 'pending'));
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  /* ------------------------------------------------------------------
+     Aviso discreto (toast)
+     ------------------------------------------------------------------ */
+  function toast(msg){
+    let el = document.getElementById('audToast');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'audToast';
+      el.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--amber);color:var(--text);padding:12px 18px;border-radius:10px;font-size:13px;z-index:10001;max-width:420px;width:calc(100% - 32px);text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.5);line-height:1.5;display:none;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = msg;
+    el.style.display = 'block';
+    clearTimeout(el._t);
+    el._t = setTimeout(()=>{ el.style.display='none'; }, 6000);
+  }
+
+  /* ==================================================================
+     1) CARREGAMENTO E GRAVAÇÃO SEGUROS DO PLANO DE LIMPEZA
+     ================================================================== */
+  const _base = {};            // ds -> último estado lido do servidor
+  const _loadFailed = new Set();
+
+  // Substitui loadDay: distingue "dia vazio" de "falha de conexão" e
+  // atualiza o objeto do cache NO LUGAR (as telas abertas continuam
+  // apontando para o mesmo objeto).
+  loadDay = async function(ds){
+    let fresh;
+    try{
+      const snap = await withTimeout(fbRoot.child(encodeKey('checklist:'+ds)).get());
+      fresh = snap.exists() ? JSON.parse(snap.val()) : {};
+    }catch(e){
+      console.error('[Checklist] Falha ao carregar '+ds, e);
+      _loadFailed.add(ds);
+      if(!dayCache[ds]) dayCache[ds] = {};
+      return dayCache[ds];
+    }
+    _loadFailed.delete(ds);
+    const obj = dayCache[ds] || (dayCache[ds] = {});
+    Object.keys(obj).forEach(k=>delete obj[k]);
+    Object.assign(obj, fresh);
+    _base[ds] = clone(fresh);
+    return obj;
+  };
+
+  // Substitui saveDay: descobre exatamente o que o usuário mudou
+  // (comparando com o último estado lido) e grava só isso, por transação.
+  saveDay = async function(ds){
+    const cur  = dayCache[ds] || (dayCache[ds] = {});
+    const base = _base[ds] || {};
+    const changes = [];
+    new Set([...Object.keys(base), ...Object.keys(cur)]).forEach(k=>{
+      const before = (k in base) ? base[k] : null;
+      const after  = (k in cur)  ? cur[k]  : null;
+      if(JSON.stringify(before) !== JSON.stringify(after)){
+        changes.push({k, before: before===null?null:clone(before), after: after===null?null:clone(after)});
+      }
+    });
+    if(!changes.length) return;
+
+    const ref = fbRoot.child(encodeKey('checklist:'+ds));
+    const tx = ref.transaction(v=>{
+      let obj = {};
+      if(v){ try{ obj = JSON.parse(v); }catch(e){ return; } } // dado corrompido: aborta, não sobrescreve
+      changes.forEach(c=>{ if(c.after===null) delete obj[c.k]; else obj[c.k] = c.after; });
+      return JSON.stringify(obj);
+    });
+
+    const onCommitted = res=>{
+      const merged = JSON.parse(res.snapshot.val() || '{}');
+      const obj = dayCache[ds] || (dayCache[ds] = {});
+      Object.keys(obj).forEach(k=>delete obj[k]);
+      Object.assign(obj, merged);
+      _base[ds] = clone(merged);
+      changes.forEach(c=>registrarAuditoria(ds, c.k, c.before, c.after));
+    };
+
+    try{
+      const res = await withTimeout(tx, 15000);
+      if(!res.committed) throw new Error('Transação não confirmada');
+      onCommitted(res);
+    }catch(e){
+      if(e && e.message==='timeout'){
+        // A transação continua na fila do Firebase; se confirmar depois, registra a auditoria.
+        tx.then(res=>{ if(res && res.committed) onCommitted(res); }).catch(()=>{});
+        toast('⏳ <strong>Conexão lenta.</strong> A marcação ainda não foi confirmada pelo servidor. Confira a tela em alguns instantes antes de clicar de novo.');
+      } else {
+        console.error('[Checklist] Erro ao salvar '+ds, e);
+        changes.forEach(c=>{ if(c.before===null) delete cur[c.k]; else cur[c.k] = c.before; });
+        alert('❌ A alteração NÃO foi salva. Verifique a conexão e tente novamente.');
+      }
+    }
+  };
+
+  // Aviso na tela quando o dia não pôde ser carregado
+  const _origRenderDay = renderDay;
+  renderDay = async function(){
+    const r = await _origRenderDay.apply(this, arguments);
+    const ds = dateStr(currentDate);
+    if(section==='checklist' && mode==='day' && _loadFailed.has(ds)){
+      const app = document.getElementById('app');
+      if(app && !document.getElementById('audLoadWarn')){
+        const w = document.createElement('div');
+        w.id = 'audLoadWarn';
+        w.className = 'card';
+        w.style.cssText = 'border-color:var(--bad);margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
+        w.innerHTML = '<div style="flex:1;min-width:200px;font-size:13px;">⚠️ <strong>Não foi possível carregar as marcações deste dia</strong> (falha de conexão). A tela pode estar incompleta.</div><button class="btn small" id="audRetryDay">Tentar novamente</button>';
+        app.insertBefore(w, app.firstChild);
+        document.getElementById('audRetryDay').addEventListener('click', ()=>renderDay());
+      }
+    }
+    return r;
+  };
+
+  /* ==================================================================
+     2) REGISTRO DE AUDITORIA
+     ================================================================== */
+  function hhmm(h,m){ return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); }
+
+  function descreverItem(loc, turnKey, idx, date){
+    if(!loc) return 'Ocorrência '+(idx+1);
+    const meal = loc.meals && loc.meals[turnKey] && loc.meals[turnKey][idx];
+    if(meal) return meal.label+' ('+hhmm(meal.start[0],meal.start[1])+'–'+hhmm(meal.end[0],meal.end[1])+')';
+    const n  = resolveFreq(loc, turnKey, date);
+    const dl = occDeadline(loc, turnKey, idx, date);
+    return 'Limpeza '+(idx+1)+' de '+n+(dl ? ' · prazo '+fmtTime(dl.getTime()) : '');
+  }
+
+  function registrarAuditoria(ds, k, before, after){
+    try{
+      const [locName, turnKey, idxStr] = k.split('|');
+      const idx = parseInt(idxStr, 10) || 0;
+      const [y,m,d] = ds.split('-').map(Number);
+      const date = new Date(y, m-1, d);
+      const loc = getLocationsForDate(date).find(l=>l.name===locName);
+      const turno = TURNS.find(t=>t.key===turnKey);
+      const antes = stateOf(before), depois = stateOf(after);
+      const acao = depois==='done' ? 'marcou' : ((antes==='done' || !after) ? 'desmarcou' : 'marcou');
+
+      const reg = {
+        acao,
+        itemId: k,
+        lancamentoId: ds+'|'+k,
+        area: locName,
+        item: descreverItem(loc, turnKey, idx, date),
+        turnoKey: turnKey,
+        turno: turno ? turno.label : turnKey,
+        dataPlano: ds,
+        estadoAnterior: antes,
+        estadoNovo: depois,
+        usuario: currentUser ? currentUser.nome : null,
+        usuarioPerfil: currentUser ? (currentUser.perfil || 'operador') : (isAdmin ? 'admin-senha' : null),
+        usuarioIdentificado: !!currentUser,
+        responsavelExecucao: (after && typeof after==='object' && after.emp) ? after.emp : null,
+        tsCliente: Date.now(),
+        ts: firebase.database.ServerValue.TIMESTAMP
+      };
+      Object.keys(reg).forEach(key=>{ if(reg[key]===null) delete reg[key]; });
+
+      withTimeout(fbRoot.child(AUDIT_PATH).push(reg), 15000).catch(e=>{
+        console.warn('[Auditoria] Registro ainda não confirmado pelo servidor:', e);
+        toast('⏳ O registro do histórico ainda não foi confirmado. Mantenha a página aberta até a conexão voltar.');
+      });
+    }catch(e){
+      console.error('[Auditoria] Falha ao montar registro', e);
+    }
+  }
+
+  /* ==================================================================
+     3) TELA "HISTÓRICO DE ALTERAÇÕES" (somente Admin)
+     ================================================================== */
+  const style = document.createElement('style');
+  style.textContent = `
+    .aud-acao{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;}
+    .aud-acao.marcou{background:rgba(76,175,110,.18);color:var(--ok);}
+    .aud-acao.desmarcou{background:rgba(217,106,90,.18);color:var(--bad);}
+    .aud-filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;}
+    .aud-filtros .f{display:flex;flex-direction:column;gap:3px;flex:1;min-width:130px;}
+    .aud-filtros label{font-size:11px;color:var(--text-dim);}
+    .aud-filtros input,.aud-filtros select{background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;font-family:inherit;width:100%;}
+    .aud-filtros .acoes{display:flex;gap:8px;}
+    .aud-sub{font-size:11px;color:var(--text-dim);margin-top:2px;}
+    @media (max-width:767px){
+      .aud-filtros .f{min-width:calc(50% - 5px);}
+      .aud-filtros input,.aud-filtros select{font-size:16px;}
+      .aud-filtros .acoes{width:100%;}
+      .aud-filtros .acoes .btn{flex:1;}
+    }`;
+  document.head.appendChild(style);
+
+  const fmtData = new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',year:'numeric'});
+  const fmtHora = new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit'});
+  const fmtFull = new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'medium'});
+
+  let filtros = null;
+  let logs = [];
+
+  function filtrosPadrao(){
+    const hoje = actualDateTimeBRT();
+    const ini = new Date(hoje); ini.setDate(ini.getDate()-6);
+    return {de:dateStr(ini), ate:dateStr(hoje), usuario:'', turno:'', area:'', acao:''};
+  }
+  // Limites do período em horário de Brasília (UTC-3)
+  function limitesBRT(de, ate){
+    const [y1,m1,d1] = de.split('-').map(Number);
+    const [y2,m2,d2] = ate.split('-').map(Number);
+    return {ini: Date.UTC(y1,m1-1,d1,3,0,0,0), fim: Date.UTC(y2,m2-1,d2+1,3,0,0,0)-1};
+  }
+  const nomeUsuario = r => r.usuario || 'Admin (senha geral, sem usuário)';
+  const tsDe = r => (typeof r.ts==='number' ? r.ts : r.tsCliente) || 0;
+
+  async function renderHistorico(){
+    const app = document.getElementById('app');
+    if(!isAdmin){ app.innerHTML = '<div class="empty-state" style="margin-top:40px;">⛔ Acesso restrito ao administrador.</div>'; return; }
+    if(!filtros) filtros = filtrosPadrao();
+
+    app.innerHTML = `
+      <div style="max-width:1100px;">
+        <div style="margin-bottom:16px;">
+          <div style="font-size:18px;font-weight:700;">🕘 Histórico de Alterações</div>
+          <div style="font-size:13px;color:var(--text-dim);margin-top:2px;">Quem marcou e desmarcou itens do Plano de Limpeza. Registro somente leitura.</div>
+        </div>
+        <div class="aud-filtros">
+          <div class="f"><label>De</label><input type="date" id="audDe" value="${filtros.de}"></div>
+          <div class="f"><label>Até</label><input type="date" id="audAte" value="${filtros.ate}"></div>
+          <div class="f"><label>Usuário</label><select id="audUsuario"><option value="">Todos</option></select></div>
+          <div class="f"><label>Turno</label>
+            <select id="audTurno">
+              <option value="">Todos</option>
+              <option value="T1" ${filtros.turno==='T1'?'selected':''}>T1 (diurno)</option>
+              <option value="T2" ${filtros.turno==='T2'?'selected':''}>T2 (noturno)</option>
+            </select></div>
+          <div class="f"><label>Área</label><select id="audArea"><option value="">Todas</option></select></div>
+          <div class="f"><label>Ação</label>
+            <select id="audAcao">
+              <option value="">Todos</option>
+              <option value="marcou" ${filtros.acao==='marcou'?'selected':''}>Marcou</option>
+              <option value="desmarcou" ${filtros.acao==='desmarcou'?'selected':''}>Desmarcou</option>
+            </select></div>
+          <div class="acoes">
+            <button class="btn small" id="audAplicar">Aplicar</button>
+            <button class="btn small secondary" id="audLimpar">Limpar filtros</button>
+          </div>
+        </div>
+        <div id="audResultado"><div class="loading">Carregando histórico...</div></div>
+      </div>`;
+
+    document.getElementById('audAplicar').addEventListener('click', ()=>{
+      let de = document.getElementById('audDe').value || filtros.de;
+      let ate = document.getElementById('audAte').value || filtros.ate;
+      if(de > ate){ const t = de; de = ate; ate = t; }
+      Object.assign(filtros, {de, ate});
+      lerFiltrosSelects();
+      carregar();
+    });
+    document.getElementById('audLimpar').addEventListener('click', ()=>{ filtros = filtrosPadrao(); renderHistorico(); });
+    ['audUsuario','audTurno','audArea','audAcao'].forEach(id=>{
+      document.getElementById(id).addEventListener('change', ()=>{ lerFiltrosSelects(); desenhar(); });
+    });
+
+    await carregar();
+  }
+
+  function lerFiltrosSelects(){
+    filtros.usuario = document.getElementById('audUsuario')?.value || '';
+    filtros.turno   = document.getElementById('audTurno')?.value || '';
+    filtros.area    = document.getElementById('audArea')?.value || '';
+    filtros.acao    = document.getElementById('audAcao')?.value || '';
+  }
+
+  async function carregar(){
+    const out = document.getElementById('audResultado');
+    if(!out) return;
+    out.innerHTML = '<div class="loading">Carregando histórico...</div>';
+    const {ini, fim} = limitesBRT(filtros.de, filtros.ate);
+    const ref = fbRoot.child(AUDIT_PATH);
+    const paraLista = snap=>{
+      const lista = [];
+      if(snap && snap.exists()) snap.forEach(ch=>{ lista.push(Object.assign({id: ch.key}, ch.val())); });
+      return lista;
+    };
+    let lista, erroFinal = null;
+    try{
+      // 1ª tentativa: consulta por período no servidor (precisa de ".indexOn": ["ts"] nas regras)
+      lista = paraLista(await withTimeout(ref.orderByChild('ts').startAt(ini).endAt(fim).get(), 20000));
+    }catch(e1){
+      console.warn('[Auditoria] Consulta por período recusada, usando leitura completa:', e1);
+      try{
+        // 2ª tentativa: lê todos os registros e filtra o período no navegador
+        lista = paraLista(await withTimeout(ref.once('value'), 30000))
+          .filter(r=>{ const t = tsDe(r); return t>=ini && t<=fim; });
+      }catch(e2){
+        erroFinal = e2;
+      }
+    }
+    if(erroFinal){
+      console.error('[Auditoria] Falha ao carregar histórico', erroFinal);
+      const msg = String(erroFinal && (erroFinal.code || erroFinal.message) || erroFinal);
+      let motivo = 'Erro: ' + esc(msg);
+      if(/permission/i.test(msg)) motivo = 'O Firebase recusou a leitura (permission_denied). Verifique as regras do banco para <code>sistema_limpeza/auditLogs</code>.';
+      else if(msg==='timeout') motivo = 'O servidor não respondeu a tempo.';
+      out.innerHTML = '<div class="empty-state" style="color:var(--bad);">Não foi possível carregar o histórico.<div style="font-size:12px;color:var(--text-dim);margin-top:6px;">'+motivo+'</div><br><button class="btn small" id="audTentar">Tentar novamente</button></div>';
+      document.getElementById('audTentar').addEventListener('click', carregar);
+      return;
+    }
+    logs = lista.sort((a,b)=>tsDe(b)-tsDe(a));
+    preencherOpcoes();
+    desenhar();
+  }
+
+  function preencherOpcoes(){
+    const fill = (id, valores, todos, atual)=>{
+      const sel = document.getElementById(id);
+      if(!sel) return;
+      const lista = [...new Set(valores)].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+      if(atual && !lista.includes(atual)) lista.unshift(atual);
+      sel.innerHTML = `<option value="">${todos}</option>` +
+        lista.map(v=>`<option value="${esc(v)}" ${v===atual?'selected':''}>${esc(v)}</option>`).join('');
+    };
+    fill('audUsuario', logs.map(nomeUsuario), 'Todos', filtros.usuario);
+    fill('audArea', logs.map(r=>r.area).filter(Boolean), 'Todas', filtros.area);
+  }
+
+  function desenhar(){
+    const out = document.getElementById('audResultado');
+    if(!out) return;
+    const f = filtros;
+    const diurno  = k => k==='T1D' || k==='T2D';
+    const noturno = k => k==='T1N' || k==='T2N';
+    const rows = logs.filter(r=>{
+      if(f.usuario && nomeUsuario(r)!==f.usuario) return false;
+      if(f.turno==='T1' && !diurno(r.turnoKey)) return false;
+      if(f.turno==='T2' && !noturno(r.turnoKey)) return false;
+      if(f.area && r.area!==f.area) return false;
+      if(f.acao && r.acao!==f.acao) return false;
+      return true;
+    });
+
+    if(!rows.length){
+      out.innerHTML = '<div class="empty-state">Nenhum registro no período e filtros selecionados.</div>';
+      return;
+    }
+    const LIMITE = 1000;
+    const vis = rows.slice(0, LIMITE);
+    out.innerHTML = `
+      <div class="tablewrap"><table class="report-table">
+        <thead><tr><th>Data</th><th>Horário</th><th>Usuário</th><th>Turno</th><th>Área</th><th>Item</th><th>Ação</th></tr></thead>
+        <tbody>${vis.map(r=>{
+          const t = tsDe(r);
+          const d = new Date(t);
+          const tip = 'Registrado em '+fmtFull.format(d)+' · Lançamento: '+(r.lancamentoId||r.itemId||'')+' · ID do log: '+r.id;
+          const resp = (r.responsavelExecucao && r.responsavelExecucao!==r.usuario)
+            ? `<div class="aud-sub">Responsável pela execução: ${esc(r.responsavelExecucao)}</div>` : '';
+          const semUsuario = r.usuario ? '' : ' style="color:var(--amber);"';
+          return `<tr title="${esc(tip)}">
+            <td style="white-space:nowrap;">${fmtData.format(d)}</td>
+            <td style="white-space:nowrap;font-variant-numeric:tabular-nums;">${fmtHora.format(d)}</td>
+            <td><span${semUsuario}>${esc(nomeUsuario(r))}</span>${resp}</td>
+            <td style="white-space:nowrap;">${esc(r.turno||r.turnoKey||'—')}</td>
+            <td>${esc(r.area||'—')}</td>
+            <td>${esc(r.item||'—')}${r.dataPlano?`<div class="aud-sub">Plano de ${esc(r.dataPlano.split('-').reverse().join('/'))}</div>`:''}</td>
+            <td><span class="aud-acao ${r.acao==='desmarcou'?'desmarcou':'marcou'}">${r.acao==='desmarcou'?'Desmarcou':'Marcou'}</span></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:8px;">
+        ${rows.length} registro(s)${rows.length>LIMITE?` · exibindo os ${LIMITE} mais recentes (reduza o período para ver os demais)`:''}
+      </div>`;
+  }
+
+  window.renderHistorico = renderHistorico;
+
+  /* ==================================================================
+     4) NAVEGAÇÃO (desktop + menu "Mais" do celular)
+     ================================================================== */
+  function atualizarVisibilidade(){
+    const show = !!isAdmin;
+    const b = document.getElementById('navHistorico');
+    if(b){ b.style.display = show ? '' : 'none'; b.classList.toggle('active', section==='historico'); }
+    const mb = document.getElementById('msheetHistorico');
+    if(mb) mb.style.display = show ? '' : 'none';
+  }
+
+  function abrirHistorico(){
+    if(!isAdmin){ alert('Acesso restrito ao administrador.'); return; }
+    section = 'historico';
+    renderTopControls();
+    if(typeof window.updateMobileActiveState === 'function') window.updateMobileActiveState('navHistorico');
+    renderHistorico();
+  }
+
+  function instalarNavegacao(){
+    if(KIOSK) return;
+    const nav = document.querySelector('.mainnav');
+    if(nav && !document.getElementById('navHistorico')){
+      const b = document.createElement('button');
+      b.id = 'navHistorico';
+      b.textContent = '🕘 Histórico';
+      b.style.display = 'none';
+      nav.insertBefore(b, document.getElementById('navAdmin'));
+      b.addEventListener('click', abrirHistorico);
+    }
+    const sheet = document.querySelector('#mobileMoreMenu .mobile-more-sheet');
+    if(sheet && !document.getElementById('msheetHistorico')){
+      const mb = document.createElement('button');
+      mb.id = 'msheetHistorico';
+      mb.style.display = 'none';
+      mb.innerHTML = '<span class="msheet-icon">🕘</span> Histórico de Alterações';
+      sheet.insertBefore(mb, sheet.querySelector('button[data-target="navAdmin"]'));
+      mb.addEventListener('click', ()=>{
+        document.getElementById('mobileMoreMenu')?.classList.remove('open');
+        abrirHistorico();
+      });
+    }
+    atualizarVisibilidade();
+  }
+
+  // Mantém o botão sincronizado com login/logout/modo admin
+  const _rtc = renderTopControls;
+  renderTopControls = function(){ const r = _rtc.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _sab = showAdminBadge;
+  showAdminBadge = function(){ const r = _sab.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _alo = adminLogout;
+  adminLogout = function(){
+    if(section==='historico') section = 'checklist';
+    const r = _alo.apply(this, arguments); atualizarVisibilidade(); return r;
+  };
+  const _rul = renderUserLogin;
+  renderUserLogin = async function(){
+    if(section==='historico') section = 'checklist';
+    const r = await _rul.apply(this, arguments); atualizarVisibilidade(); return r;
+  };
+
+  instalarNavegacao();
+})();
 </script>
 </body>
 </html>
