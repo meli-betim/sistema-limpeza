@@ -6600,5 +6600,730 @@ setTimeout(()=>{
   instalarNavegacao();
 })();
 </script>
+
+<!-- ===== Relatório PDF — Performance Semanal ===== -->
+<script>
+/* =====================================================================
+   RELATÓRIO PDF — PERFORMANCE SEMANAL | GESTÃO DE LIMPEZA
+   ---------------------------------------------------------------------
+   Botão na aba "Relatório" → escolhe o período → abre o relatório em
+   A4 paisagem numa nova aba e já abre a janela de impressão
+   ("Salvar como PDF"). Todos os números vêm dos dados reais do sistema:
+     - Plano de Limpeza:  checklist:{data}      (loadDay)
+     - Efetivo:           efetivo:{data}        (loadEfetivo + TURNO_PREVISTO)
+     - Solicitações:      requests              (loadAllRequests)
+   Nada é gravado no banco por este módulo (somente leitura).
+   ===================================================================== */
+(function(){
+  'use strict';
+
+  // ── Configurações ─────────────────────────────────────────────────
+  // Logo oficial: coloque o arquivo da marca no MESMO repositório do
+  // index.html com este nome (ou troque pelo caminho/URL correto).
+  const LOGO_ML_URL   = 'logo-mercado-livre.png';
+  const SLA_META_H    = 4;     // prazo de atendimento das solicitações (mesmo do painel)
+  const META_PLANO    = (typeof GOAL_PCT==='number') ? GOAL_PCT : 95; // meta do plano (já usada no sistema)
+  const MAX_DIAS      = 31;
+  // Solicitação EXTRA = demanda registrada em Relatório → Solicitações, fora da rotina
+  // do Plano de Limpeza. Hoje todo registro dessa base é uma solicitação extra.
+  // Se no futuro existir um campo que diferencie, ajuste somente esta função.
+  const isExtra = r => true;
+  const MAX_TIPOS_GRAFICO = 7;  // acima disso, os menores são agrupados em "Demais tipos"
+
+  const SLA_META_MS = SLA_META_H*3600000;
+  const AZUL = '#2D3277', AMARELO = '#FFE600', AMARELO_BARRA = '#F5C400';
+  const DIA_SEM = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const grupoTurno = k => (k==='T1D'||k==='T2D') ? 'T1' : 'T2';   // T1 = Manhã | T2 = Noite
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const p2 = n => String(n).padStart(2,'0');
+  const ddmm = d => p2(d.getDate())+'/'+p2(d.getMonth()+1);
+  const ddmmaaaa = d => ddmm(d)+'/'+d.getFullYear();
+  const pct = (a,b) => b>0 ? a/b*100 : null;
+  const fmtPct = (v,dec=0) => v==null ? '—' : v.toFixed(dec).replace('.',',')+'%';
+  const parseDs = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); };
+  const dsOf = d => d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+  function fmtDur(ms){
+    if(ms==null) return '—';
+    const min = Math.round(ms/60000);
+    if(min<60) return min+' min';
+    const h=Math.floor(min/60), m=min%60;
+    if(h<24) return m ? h+'h '+p2(m)+'min' : h+'h';
+    const d=Math.floor(h/24), hr=h%24;
+    return hr ? d+'d '+hr+'h' : d+'d';
+  }
+  function diasDoPeriodo(de, ate){
+    const arr=[]; const fim=parseDs(ate);
+    for(let d=parseDs(de); d<=fim; d.setDate(d.getDate()+1)) arr.push(new Date(d));
+    return arr;
+  }
+  const clsPlano = v => v==null ? '' : (v>=META_PLANO ? 'ok' : v>=80 ? 'warn' : 'bad');
+
+  /* ==================================================================
+     1) COLETA E CÁLCULO (somente dados reais)
+     ================================================================== */
+  async function calcCumprimento(dias){
+    const hoje = getOperationalDate();
+    const agoraMs = actualDateTimeBRT().getTime();
+    const cache = await Promise.all(dias.map(d=>loadDay(dsOf(d))));
+    return dias.map((d, di)=>{
+      const data = cache[di] || {};
+      const r = { d, futuro: d>hoje, parcial: dsOf(d)===dsOf(hoje),
+                  T1:{prev:0, real:0}, T2:{prev:0, real:0} };
+      if(r.futuro) return r;
+      getLocationsForDate(d).forEach(loc=>{
+        activeTurns(d).forEach(t=>{
+          const n = resolveFreq(loc, t.key, d);
+          for(let i=0;i<n;i++){
+            const feito = getEntry(data, loc.name+'|'+t.key+'|'+i).state==='done';
+            if(r.parcial && !feito){
+              // Dia em andamento: só entra no previsto o que já venceu o prazo
+              const dl = occDeadline(loc, t.key, i, d);
+              if(!dl || dl.getTime() > agoraMs) continue;
+            }
+            const g = grupoTurno(t.key);
+            r[g].prev++;
+            if(feito) r[g].real++;
+          }
+        });
+      });
+      return r;
+    });
+  }
+
+  async function calcAbsenteismo(dias){
+    const hoje = getOperationalDate();
+    const efs = await Promise.all(dias.map(d=>loadEfetivo(dsOf(d))));
+    return dias.map((d, di)=>{
+      const ef = efs[di] || {};
+      const r = { d, futuro: d>hoje,
+                  T1:{prev:0, pres:0, lanc:false}, T2:{prev:0, pres:0, lanc:false} };
+      if(r.futuro) return r;
+      const turnos = ef._turnos || activeTurns(d).map(t=>t.key);
+      turnos.forEach(tk=>{
+        if(!Array.isArray(ef[tk])) return;            // turno sem lançamento de efetivo
+        const g = grupoTurno(tk);
+        r[g].lanc = true;
+        r[g].prev += TURNO_PREVISTO[tk] || 0;
+        r[g].pres += ef[tk].length;
+      });
+      ['T1','T2'].forEach(g=>{ r[g].aus = Math.max(0, r[g].prev - r[g].pres); });
+      return r;
+    });
+  }
+
+  async function calcSolicitacoes(dias){
+    try{ _reqLoadTs = 0; }catch(e){}                   // força leitura atualizada
+    const todas = await loadAllRequests();
+    const ini = new Date(dias[0]); ini.setHours(0,0,0,0);
+    const fim = new Date(dias[dias.length-1]); fim.setHours(23,59,59,999);
+    const agora = Date.now();
+    const lista = todas
+      .filter(r=>r && r.status!=='excluida' && r.createdAt>=ini.getTime() && r.createdAt<=fim.getTime())
+      .map(r=>{
+        const concl = r.status==='concluida' && r.closedAt;
+        const retroAuto = !!(concl && r.concluidoAutomaticamente);   // lançamento retroativo encerrado sem atendimento real
+        const tempo = concl ? Math.max(0, r.closedAt - r.createdAt) : Math.max(0, agora - r.createdAt);
+        const sla = retroAuto ? 'retro'
+                  : concl ? (tempo<=SLA_META_MS ? 'dentro' : 'fora')
+                          : (tempo>SLA_META_MS ? 'fora' : 'aberto');
+        const h = new Date(r.createdAt).getHours();
+        return Object.assign({}, r, {_concl:!!concl, _retroAuto:retroAuto, _extra:isExtra(r),
+                                     _tempo:tempo, _sla:sla, _turno:(h>=7&&h<19)?'T1':'T2'});
+      })
+      .sort((a,b)=>a.createdAt-b.createdAt);
+
+    const concl = lista.filter(r=>r._concl);
+    const extrasConcl = concl.filter(r=>r._extra);
+    // Base do tempo médio: extras concluídas (abertura → conclusão) + extras EM ATENDIMENTO
+    // (status "Em andamento": tempo em aberto da abertura até agora).
+    const baseConcl = extrasConcl.filter(r=>!r._retroAuto);
+    const baseAnd   = lista.filter(r=>r._extra && r.status==='andamento');
+    const baseTempo = baseConcl.concat(baseAnd);
+    const tempoMedioExtras = baseTempo.length ? baseTempo.reduce((s,r)=>s+r._tempo,0)/baseTempo.length : null;
+
+    // Por tipo de ocorrência (mesmo campo "Tipo de Ocorrência" da solicitação)
+    const cont = {};
+    lista.forEach(r=>{ const t = (r.tipo && String(r.tipo).trim()) || 'Não informado'; cont[t] = (cont[t]||0)+1; });
+    let tipos = Object.entries(cont).map(([tipo,qtd])=>({tipo, qtd})).sort((a,b)=>b.qtd-a.qtd || a.tipo.localeCompare(b.tipo,'pt-BR'));
+    if(tipos.length > MAX_TIPOS_GRAFICO){
+      const resto = tipos.slice(MAX_TIPOS_GRAFICO-1);
+      tipos = tipos.slice(0, MAX_TIPOS_GRAFICO-1).concat([{tipo:'Demais tipos ('+resto.length+')', qtd: resto.reduce((s,t)=>s+t.qtd,0)}]);
+    }
+
+    return {
+      lista,
+      total: lista.length,
+      totalExtras: lista.filter(r=>r._extra).length,
+      t1: lista.filter(r=>r._turno==='T1').length,
+      t2: lista.filter(r=>r._turno==='T2').length,
+      concluidas: concl.length,
+      andamento: lista.filter(r=>r.status==='andamento').length,
+      pendentes: lista.filter(r=>r.status==='aberta').length,
+      tempoMedioExtras,
+      qtdTempoExtras: baseTempo.length,
+      qtdTempoConcl: baseConcl.length,
+      qtdTempoAnd: baseAnd.length,
+      retroSemTempo: extrasConcl.length - baseTempo.length,
+      tipos,
+    };
+  }
+
+  async function coletarDados(de, ate){
+    const dias = diasDoPeriodo(de, ate);
+    const [plano, abs, sol] = await Promise.all([calcCumprimento(dias), calcAbsenteismo(dias), calcSolicitacoes(dias)]);
+    return {de, ate, dias, plano, abs, sol, geradoEm: actualDateTimeBRT()};
+  }
+
+  /* ==================================================================
+     2) GRÁFICOS (SVG puro, nítidos na impressão)
+     ================================================================== */
+  function svgBarras(itens){
+    const W=640, H=186, pl=34, pr=8, pt=24, pb=32, iw=W-pl-pr, ih=H-pt-pb;
+    const vals = itens.flatMap(i=>[i.t1,i.t2]).filter(v=>v!=null);
+    let min = vals.length ? Math.floor((Math.min(...vals)-5)/10)*10 : 0;
+    min = Math.max(0, Math.min(min, 70));
+    const max = 100, step = (max-min)>50 ? 20 : 10;
+    const y = v => pt + ih - (Math.min(Math.max(v,min),max)-min)/(max-min)*ih;
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif">`;
+    s += `<rect x="${pl}" y="6" width="9" height="9" rx="2" fill="${AZUL}"/><text x="${pl+13}" y="14" font-size="10" fill="#374151">T1 (Manhã)</text>`;
+    s += `<rect x="${pl+90}" y="6" width="9" height="9" rx="2" fill="${AMARELO_BARRA}"/><text x="${pl+103}" y="14" font-size="10" fill="#374151">T2 (Noite)</text>`;
+    for(let v=min; v<=max; v+=step){
+      s += `<line x1="${pl}" y1="${y(v)}" x2="${pl+iw}" y2="${y(v)}" stroke="#e5e7eb"/>`;
+      s += `<text x="${pl-4}" y="${y(v)+3}" font-size="9" fill="#6b7280" text-anchor="end">${v}%</text>`;
+    }
+    s += `<line x1="${pl}" y1="${y(META_PLANO)}" x2="${pl+iw}" y2="${y(META_PLANO)}" stroke="#16a34a" stroke-width="1" stroke-dasharray="4 3"/>`;
+    s += `<text x="${pl+iw}" y="${y(META_PLANO)-3}" font-size="8" fill="#16a34a" text-anchor="end">meta ${META_PLANO}%</text>`;
+    const gw = iw/Math.max(1,itens.length), bw = Math.min(24, gw*0.34);
+    itens.forEach((it, i)=>{
+      const cx = pl + gw*i + gw/2;
+      [['t1',AZUL,-1],['t2',AMARELO_BARRA,1]].forEach(([k,cor,lado])=>{
+        const v = it[k]; if(v==null) return;
+        const x = cx + (lado<0 ? -bw-1 : 1), yy = y(v);
+        s += `<rect x="${x}" y="${yy}" width="${bw}" height="${pt+ih-yy}" fill="${cor}" rx="1.5"/>`;
+        if(itens.length<=10) s += `<text x="${x+bw/2}" y="${yy-3}" font-size="8" font-weight="700" fill="#1f2937" text-anchor="middle">${Math.round(v)}%</text>`;
+      });
+      s += `<text x="${cx}" y="${H-19}" font-size="9" fill="#374151" text-anchor="middle">${esc(it.l1)}</text>`;
+      s += `<text x="${cx}" y="${H-8}" font-size="9" fill="#374151" text-anchor="middle">${esc(it.l2)}</text>`;
+    });
+    s += `<line x1="${pl}" y1="${pt+ih}" x2="${pl+iw}" y2="${pt+ih}" stroke="#9ca3af"/></svg>`;
+    return s;
+  }
+
+  function svgLinhas(itens){
+    const W=340, H=190, pl=30, pr=16, pt=24, pb=32, iw=W-pl-pr, ih=H-pt-pb;
+    const vals = itens.flatMap(i=>[i.t1,i.t2]).filter(v=>v!=null);
+    const maxV = vals.length ? Math.max(...vals) : 0;
+    const max = Math.max(10, Math.ceil((maxV+2)/5)*5), step = max<=20 ? (max<=10?2:5) : 10;
+    const y = v => pt + ih - v/max*ih;
+    const x = i => pl + (itens.length<=1 ? iw/2 : iw*i/(itens.length-1));
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif">`;
+    s += `<line x1="${pl}" y1="10" x2="${pl+14}" y2="10" stroke="${AZUL}" stroke-width="2.5"/><circle cx="${pl+7}" cy="10" r="3" fill="${AZUL}"/><text x="${pl+19}" y="13" font-size="10" fill="#374151">T1 (Manhã)</text>`;
+    s += `<line x1="${pl+95}" y1="10" x2="${pl+109}" y2="10" stroke="${AMARELO_BARRA}" stroke-width="2.5"/><circle cx="${pl+102}" cy="10" r="3" fill="${AMARELO_BARRA}"/><text x="${pl+114}" y="13" font-size="10" fill="#374151">T2 (Noite)</text>`;
+    for(let v=0; v<=max; v+=step){
+      s += `<line x1="${pl}" y1="${y(v)}" x2="${pl+iw}" y2="${y(v)}" stroke="#e5e7eb"/>`;
+      s += `<text x="${pl-4}" y="${y(v)+3}" font-size="9" fill="#6b7280" text-anchor="end">${v}%</text>`;
+    }
+    [['t1',AZUL],['t2',AMARELO_BARRA]].forEach(([k,cor])=>{
+      let d='', aberto=false;
+      itens.forEach((it,i)=>{
+        if(it[k]==null){ aberto=false; return; }
+        d += (aberto?'L':'M')+x(i).toFixed(1)+' '+y(it[k]).toFixed(1)+' '; aberto=true;
+      });
+      if(d) s += `<path d="${d}" fill="none" stroke="${cor}" stroke-width="2.2"/>`;
+      itens.forEach((it,i)=>{
+        if(it[k]==null) return;
+        s += `<circle cx="${x(i)}" cy="${y(it[k])}" r="3" fill="${cor}"/>`;
+        if(itens.length<=10) s += `<text x="${x(i)}" y="${y(it[k])+(k==='t1'?12:-5)}" font-size="8" font-weight="700" fill="${k==='t1'?AZUL:'#a16207'}" text-anchor="middle">${fmtPct(it[k],1)}</text>`;
+      });
+    });
+    itens.forEach((it,i)=>{
+      s += `<text x="${x(i)}" y="${H-19}" font-size="9" fill="#374151" text-anchor="middle">${esc(it.l1)}</text>`;
+      s += `<text x="${x(i)}" y="${H-8}" font-size="9" fill="#374151" text-anchor="middle">${esc(it.l2)}</text>`;
+    });
+    s += `<line x1="${pl}" y1="${pt+ih}" x2="${pl+iw}" y2="${pt+ih}" stroke="#9ca3af"/></svg>`;
+    return s;
+  }
+
+  const PALETA = ['#2D3277','#F5C400','#16a34a','#0ea5e9','#f97316','#dc2626','#8b5cf6','#9ca3af'];
+  function svgTipos(tipos, total){
+    const r=42, c=2*Math.PI*r;
+    let acc=0;
+    let s = `<svg viewBox="0 0 120 120" width="108" height="108" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif">
+      <circle cx="60" cy="60" r="${r}" fill="none" stroke="#e5e7eb" stroke-width="18"/>`;
+    if(total>0) tipos.forEach((t,i)=>{
+      const len = c*t.qtd/total;
+      s += `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${PALETA[i%PALETA.length]}" stroke-width="18"
+              stroke-dasharray="${len} ${c-len}" stroke-dashoffset="${-acc}" transform="rotate(-90 60 60)"/>`;
+      acc += len;
+    });
+    s += `<text x="60" y="62" font-size="22" font-weight="800" fill="${AZUL}" text-anchor="middle">${total}</text>
+          <text x="60" y="76" font-size="9" fill="#6b7280" text-anchor="middle">Total</text></svg>`;
+    return s;
+  }
+
+  /* ==================================================================
+     3) MONTAGEM DO DOCUMENTO A4
+     ================================================================== */
+  function logoHtml(){
+    let src = LOGO_ML_URL;
+    try{ src = new URL(LOGO_ML_URL, window.location.href).href; }catch(e){}
+    return `<img class="logo-img" src="${esc(src)}" alt="Mercado Livre" onerror="this.outerHTML='<span class=&quot;logo-txt&quot;>mercado<br>livre</span>'">`;
+  }
+
+  const txtBaseTempo = sol => sol.qtdTempoExtras
+    ? sol.qtdTempoConcl+' concluída'+(sol.qtdTempoConcl===1?'':'s')+' + '+sol.qtdTempoAnd+' em andamento'
+    : 'Nenhuma solicitação extra concluída ou em andamento';
+
+  function montarHTML(D){
+    const {plano, abs, sol, dias} = D;
+    const periodo = ddmmaaaa(parseDs(D.de))+' a '+ddmmaaaa(parseDs(D.ate));
+    const gerado = ddmmaaaa(D.geradoEm)+' às '+p2(D.geradoEm.getHours())+':'+p2(D.geradoEm.getMinutes());
+    const soma = (arr, g, f) => arr.reduce((s,r)=>s+(r.futuro?0:r[g][f]),0);
+
+    // ── Plano de limpeza ──
+    const P = {
+      t1p: soma(plano,'T1','prev'), t1r: soma(plano,'T1','real'),
+      t2p: soma(plano,'T2','prev'), t2r: soma(plano,'T2','real'),
+    };
+    P.totP = P.t1p+P.t2p; P.totR = P.t1r+P.t2r;
+    const linhasPlano = plano.map(r=>{
+      const lbl = DIA_SEM[r.d.getDay()]+' ('+ddmm(r.d)+')'+(r.parcial?' *':'');
+      if(r.futuro) return `<tr class="muted"><td class="l">${lbl}</td><td colspan="7">Período futuro — não considerado</td></tr>`;
+      const p1=pct(r.T1.real,r.T1.prev), p2_=pct(r.T2.real,r.T2.prev), pt=pct(r.T1.real+r.T2.real, r.T1.prev+r.T2.prev);
+      return `<tr><td class="l">${lbl}</td>
+        <td>${r.T1.prev}</td><td>${r.T1.real}</td><td class="${clsPlano(p1)}">${fmtPct(p1)}</td>
+        <td>${r.T2.prev}</td><td>${r.T2.real}</td><td class="${clsPlano(p2_)}">${fmtPct(p2_)}</td>
+        <td class="${clsPlano(pt)}"><b>${fmtPct(pt)}</b></td></tr>`;
+    }).join('');
+    const pT1=pct(P.t1r,P.t1p), pT2=pct(P.t2r,P.t2p), pTot=pct(P.totR,P.totP);
+    const totalPlano = `<tr class="tot"><td class="l">Total da semana</td>
+      <td>${P.t1p}</td><td>${P.t1r}</td><td>${fmtPct(pT1)}</td>
+      <td>${P.t2p}</td><td>${P.t2r}</td><td>${fmtPct(pT2)}</td><td>${fmtPct(pTot)}</td></tr>`;
+    const itensBar = plano.map(r=>({l1:DIA_SEM[r.d.getDay()], l2:ddmm(r.d),
+      t1: r.futuro?null:pct(r.T1.real,r.T1.prev), t2: r.futuro?null:pct(r.T2.real,r.T2.prev)}));
+
+    // ── Absenteísmo ──
+    const A = {t1p:0,t1a:0,t2p:0,t2a:0};
+    abs.forEach(r=>{ if(r.futuro) return;
+      if(r.T1.lanc){ A.t1p+=r.T1.prev; A.t1a+=r.T1.aus; }
+      if(r.T2.lanc){ A.t2p+=r.T2.prev; A.t2a+=r.T2.aus; } });
+    const aT1=pct(A.t1a,A.t1p), aT2=pct(A.t2a,A.t2p), aTot=pct(A.t1a+A.t2a, A.t1p+A.t2p);
+    const celAbs = t => t.lanc ? `<td>${t.prev}</td><td>${t.aus}</td><td><b>${fmtPct(pct(t.aus,t.prev),1)}</b></td>`
+                               : `<td colspan="3" class="muted">sem lançamento</td>`;
+    const linhasAbs = abs.map(r=>{
+      const lbl = DIA_SEM[r.d.getDay()]+' ('+ddmm(r.d)+')';
+      if(r.futuro) return `<tr class="muted"><td class="l">${lbl}</td><td colspan="7">Período futuro</td></tr>`;
+      const tp = (r.T1.lanc?r.T1.prev:0)+(r.T2.lanc?r.T2.prev:0), ta=(r.T1.lanc?r.T1.aus:0)+(r.T2.lanc?r.T2.aus:0);
+      return `<tr><td class="l">${lbl}</td>${celAbs(r.T1)}${celAbs(r.T2)}<td><b>${tp?fmtPct(pct(ta,tp),1):'—'}</b></td></tr>`;
+    }).join('');
+    const totalAbs = `<tr class="tot"><td class="l">Total da semana</td>
+      <td>${A.t1p}</td><td>${A.t1a}</td><td>${fmtPct(aT1,1)}</td>
+      <td>${A.t2p}</td><td>${A.t2a}</td><td>${fmtPct(aT2,1)}</td><td>${fmtPct(aTot,1)}</td></tr>`;
+    const itensLinha = abs.map(r=>({l1:DIA_SEM[r.d.getDay()], l2:ddmm(r.d),
+      t1: (!r.futuro && r.T1.lanc) ? pct(r.T1.aus,r.T1.prev) : null,
+      t2: (!r.futuro && r.T2.lanc) ? pct(r.T2.aus,r.T2.prev) : null}));
+
+    // ── Solicitações ──
+    const naoRes = sol.andamento + sol.pendentes;
+    const linhasTipo = sol.tipos.map((t,i)=>`<tr><td class="l"><span class="dot" style="background:${PALETA[i%PALETA.length]}"></span>${esc(t.tipo)}</td><td>${t.qtd}</td><td>${fmtPct(pct(t.qtd, sol.total))}</td></tr>`).join('');
+
+    const kpi = (ico, cor, valor, titulo, sub, det) => `
+      <div class="kpi"><div class="ico" style="background:${cor}">${ico}</div>
+        <div><div class="v">${valor}</div><div class="t">${titulo}</div><div class="s">${sub}</div><div class="d">${det}</div></div></div>`;
+
+    const titulo = `Relatorio_Performance_Semanal_MG02_${D.de}_a_${D.ate}`;
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>${titulo}</title>
+<style>
+@page{size:A4 landscape;margin:5mm}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;background:#d1d5db;font-size:9pt}
+.bar{position:sticky;top:0;z-index:9;background:${AZUL};color:#fff;padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+.bar button{background:${AMARELO};color:${AZUL};border:none;border-radius:6px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:13px}
+.bar button.sec{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5)}
+.bar span{opacity:.85}
+.page{width:285mm;margin:12px auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.2);padding-bottom:1mm}
+.hdr{display:flex;align-items:stretch;background:${AZUL};color:#fff;min-height:19mm}
+.hdr .lg{background:${AMARELO};width:62mm;display:flex;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,90% 100%,0 100%);padding-right:6mm}
+.logo-img{max-height:14mm;max-width:48mm}
+.logo-txt{font-weight:800;color:${AZUL};font-size:17pt;line-height:.95}
+.hdr .tt{flex:1;padding:2.5mm 5mm}
+.hdr h1{margin:0;font-size:17pt;font-weight:800;letter-spacing:.2px}
+.hdr .s1{font-size:11pt;opacity:.95}
+.hdr .s2{font-size:9pt;opacity:.85;margin-top:1mm}
+.hdr .pr{padding:4mm 6mm;text-align:right;font-size:9pt;display:flex;flex-direction:column;justify-content:center}
+.hdr .pr b{font-size:11.5pt}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;padding:2.5mm 4mm 2mm}
+.kpi{border:1px solid #d1d5db;border-radius:2mm;padding:1.8mm 3mm;display:flex;gap:3mm;align-items:center}
+.kpi .ico{width:11mm;height:11mm;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15pt;flex-shrink:0}
+.kpi .v{font-size:15.5pt;font-weight:800;color:${AZUL};line-height:1}
+.kpi .t{font-weight:700;font-size:9pt;margin-top:.5mm}
+.kpi .s{font-size:7.5pt;color:#6b7280}
+.kpi .d{font-size:7.8pt;margin-top:.3mm;color:#374151}
+.sec{margin:0 4mm 2mm;border:1px solid #d1d5db;border-radius:2mm;overflow:hidden;break-inside:avoid}
+.sec h2{margin:0;background:${AZUL};color:#fff;font-size:10pt;padding:1.5mm 3mm}
+.body{display:flex;gap:3mm;padding:1.6mm 2.2mm;align-items:center}
+.row2{display:flex;gap:0;margin:0 4mm 2mm;break-inside:avoid}
+.row2 .sec{margin:0;flex:1}
+.row2 .sec+.sec{margin-left:2.5mm}
+.ch-t{font-weight:700;color:${AZUL};font-size:9pt;margin:0 0 1mm}
+table{border-collapse:collapse;width:100%}
+th{background:${AZUL};color:#fff;font-size:7.2pt;padding:.8mm 1mm;font-weight:700}
+th.sub{background:#3b4291}
+td{border-bottom:1px solid #e5e7eb;padding:.5mm 1mm;font-size:7.8pt;text-align:center}
+td.l,th.l{text-align:left;white-space:nowrap}
+td.ok{background:#dcfce7;color:#166534;font-weight:700}
+td.warn{background:#fef3c7;color:#92400e;font-weight:700}
+td.bad{background:#fee2e2;color:#991b1b;font-weight:700}
+tr.tot td{background:#dbeafe;color:${AZUL};font-weight:800;border-top:1.5px solid ${AZUL}}
+tr.sub td{color:#6b7280;font-size:7.5pt}
+.muted{color:#9ca3af}
+.ok-t{color:#15803d;font-weight:600}.warn-t{color:#b45309;font-weight:600}.bad-t{color:#b91c1c;font-weight:600}
+.st{white-space:nowrap}
+.tm{flex:0 0 47mm;text-align:center;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:1.5mm;padding:1mm 3mm}
+.tm .lb{font-size:7.2pt;font-weight:700;color:#374151}
+.tm .ob2{font-size:6.8pt;color:#6b7280}
+.tm .vl{font-size:14pt;line-height:1.15;font-weight:800;color:${AZUL};white-space:nowrap}
+.sla-med{flex:0 0 33mm;align-self:stretch;background:#fefce8;border:1px solid #fde68a;border-radius:2mm;padding:3mm;text-align:center;display:flex;flex-direction:column;justify-content:center}
+.sla-med .lb{font-size:8pt;font-weight:700;color:#374151}
+.sla-med .vl{font-size:20pt;font-weight:800;color:${AZUL};margin:1.5mm 0}
+.sla-med .tr{font-size:8pt;color:#374151;line-height:1.5}
+.sla-med .ob{font-size:7.5pt;color:#374151;margin-top:1mm}
+.sla-med .ob2{font-size:7pt;color:#6b7280}
+.leg td{padding:.45mm 1mm}
+.dot{display:inline-block;width:2.4mm;height:2.4mm;border-radius:50%;margin-right:1.2mm;vertical-align:-.2mm}
+.box-ok{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:2mm;padding:1.3mm 2.5mm;margin-bottom:1.5mm}
+.box-ok b{font-size:11.5pt;color:${AZUL}}
+.mini{display:grid;grid-template-columns:repeat(4,1fr);gap:1.5mm;margin-bottom:1.5mm}
+.mini div{border:1px solid #e5e7eb;border-radius:1.5mm;padding:.8mm;text-align:center;font-size:7pt;color:#6b7280}
+.mini b{display:block;font-size:11pt;color:${AZUL}}
+.det thead{display:table-header-group}
+.det tr{break-inside:avoid}
+.notas{margin:.5mm 4mm 0;font-size:6.6pt;color:#6b7280;line-height:1.45}
+.foot{display:flex;justify-content:space-between;align-items:center;margin:1mm 4mm 0;padding-top:1mm;border-top:1px solid #e5e7eb;font-size:7.5pt;color:#6b7280}
+.foot .logo-img{max-height:8mm}.foot .logo-txt{font-size:10pt}
+.brk{break-before:page}
+@media print{body{background:#fff}.bar{display:none}.page{margin:0;box-shadow:none;width:auto}}
+</style></head><body>
+<div class="bar"><button onclick="window.print()">⬇️ Salvar em PDF / Imprimir</button><button class="sec" onclick="window.close()">Fechar</button>
+<span>Na janela de impressão, escolha <b>“Salvar como PDF”</b> · Layout: A4 paisagem · Ative “Gráficos de plano de fundo” se as cores não aparecerem.</span></div>
+
+<div class="page">
+  <div class="hdr">
+    <div class="lg">${logoHtml()}</div>
+    <div class="tt"><h1>Relatório de Performance Semanal</h1><div class="s1">Gestão de Limpeza</div><div class="s2">Site: Mercado Livre — Betim (MG02)</div></div>
+    <div class="pr"><span>📅 Período</span><b>${periodo}</b></div>
+  </div>
+
+  <div class="kpis">
+    ${kpi('🧹','#dcfce7',fmtPct(pTot),'Cumprimento do plano de limpeza','Total do período · meta '+META_PLANO+'%','T1: '+fmtPct(pT1)+' &nbsp;|&nbsp; T2: '+fmtPct(pT2))}
+    ${kpi('👷','#dbeafe',fmtPct(aTot,1),'Absenteísmo','Total do período','T1: '+fmtPct(aT1,1)+' &nbsp;|&nbsp; T2: '+fmtPct(aT2,1))}
+    ${kpi('⏱️','#ede9fe',fmtDur(sol.tempoMedioExtras),'Tempo médio de atendimento','Solicitações extras', txtBaseTempo(sol))}
+    ${kpi('📋','#e0e7ff',sol.total,'Solicitações de limpeza','Abertas no período','T1: '+sol.t1+' &nbsp;|&nbsp; T2: '+sol.t2)}
+  </div>
+
+  <div class="sec"><h2>1. Cumprimento do Plano de Limpeza</h2>
+    <div class="body">
+      <div style="flex:0 0 49%">
+        <table><thead>
+          <tr><th class="l" rowspan="2">Dia</th><th colspan="3">T1 (Manhã)</th><th colspan="3">T2 (Noite)</th><th rowspan="2">Total do dia<br>%</th></tr>
+          <tr><th class="sub">Previsto</th><th class="sub">Realizado</th><th class="sub">%</th><th class="sub">Previsto</th><th class="sub">Realizado</th><th class="sub">%</th></tr>
+        </thead><tbody>${linhasPlano}${totalPlano}</tbody></table>
+      </div>
+      <div style="flex:1;min-width:0"><div class="ch-t">Cumprimento diário por turno — T1 x T2</div>${svgBarras(itensBar)}</div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="sec" style="flex:1.45"><h2>2. Absenteísmo</h2>
+      <div class="body">
+        <div style="flex:0 0 54%">
+          <table><thead>
+            <tr><th class="l" rowspan="2">Dia</th><th colspan="3">T1 (Manhã)</th><th colspan="3">T2 (Noite)</th><th rowspan="2">Total<br>%</th></tr>
+            <tr><th class="sub">Previsto</th><th class="sub">Ausentes</th><th class="sub">%</th><th class="sub">Previsto</th><th class="sub">Ausentes</th><th class="sub">%</th></tr>
+          </thead><tbody>${linhasAbs}${totalAbs}</tbody></table>
+        </div>
+        <div style="flex:1;min-width:0"><div class="ch-t">Evolução diária do absenteísmo</div>${svgLinhas(itensLinha)}</div>
+      </div>
+    </div>
+    <div class="sec"><h2>3. Solicitações de Limpeza</h2>
+      <div class="body" style="flex-direction:column;align-items:stretch;gap:1.8mm">
+        <div style="display:flex;gap:2mm;align-items:stretch">
+          <div class="mini" style="flex:1;margin:0;min-width:0">
+            <div><b>${sol.total}</b>Total</div><div><b>${sol.concluidas}</b>Atendidas</div>
+            <div><b>${sol.andamento}</b>Em andamento</div><div><b>${naoRes}</b>Não resolvidas</div>
+          </div>
+          <div class="tm"><div class="lb">Tempo médio de atendimento</div><div class="ob2">Solicitações extras</div>
+            <div class="vl">${fmtDur(sol.tempoMedioExtras)}</div><div class="ob2">${txtBaseTempo(sol)}</div></div>
+        </div>
+        <div>
+          <div class="ch-t">Solicitações por tipo de ocorrência</div>
+          ${sol.total ? `<div style="display:flex;gap:3mm;align-items:center">
+            <div style="flex:0 0 auto">${svgTipos(sol.tipos, sol.total)}</div>
+            <table class="leg"><thead><tr><th class="l">Tipo de ocorrência</th><th>Qtd.</th><th>% da semana</th></tr></thead><tbody>${linhasTipo}</tbody></table>
+          </div>` : '<div class="muted" style="padding:4mm 0">Nenhuma solicitação no período.</div>'}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notas">
+    <b>Critérios:</b> Cumprimento = limpezas realizadas ÷ previstas no Plano de Limpeza (T1 = Manhã, 07h–19h; T2 = Noite, 19h–07h).
+    ${plano.some(r=>r.parcial)?'* Dia em andamento: considera apenas ocorrências com prazo já vencido. ':''}
+    Absenteísmo = (efetivo previsto − presentes) ÷ previsto; turnos sem lançamento de efetivo não entram no cálculo.
+    Tempo médio de atendimento = média das solicitações extras do período: concluídas (abertura → conclusão) e em andamento (abertura → momento da geração do relatório)${sol.retroSemTempo?`; ${sol.retroSemTempo} lançamento(s) retroativo(s) encerrado(s) automaticamente, sem tempo real de atendimento, não entram na média`:''}.
+    Não resolvidas = pendentes + em andamento.
+    Solicitações excluídas pelo Admin não são contabilizadas.
+  </div>
+  <div class="foot"><span>Gerado em ${gerado} &nbsp;|&nbsp; Mercado Livre — Gestão de Limpeza · Betim (MG02)</span><span>${logoHtml()}</span></div>
+</div>
+
+<script>
+  window.addEventListener('load', function(){ setTimeout(function(){ try{ window.focus(); window.print(); }catch(e){} }, 700); });
+<\/script>
+</body></html>`;
+  }
+
+  /* ==================================================================
+     4) SELEÇÃO DO PERÍODO + GERAÇÃO
+     ================================================================== */
+  function semanaPassada(){
+    const hoje = getOperationalDate();
+    const dow = hoje.getDay();                         // 0=Dom
+    const segAtual = new Date(hoje); segAtual.setDate(hoje.getDate() - (dow===0?6:dow-1));
+    const seg = new Date(segAtual); seg.setDate(segAtual.getDate()-7);
+    const dom = new Date(seg); dom.setDate(seg.getDate()+6);
+    return {de:dsOf(seg), ate:dsOf(dom)};
+  }
+  function ultimos7(){
+    const hoje = getOperationalDate();
+    const ini = new Date(hoje); ini.setDate(hoje.getDate()-6);
+    return {de:dsOf(ini), ate:dsOf(hoje)};
+  }
+
+  function abrirSeletorPeriodo(){
+    document.getElementById('relPdfOverlay')?.remove();
+    const pad0 = semanaPassada();
+    const ov = document.createElement('div');
+    ov.id = 'relPdfOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:24px;max-width:440px;width:100%;">
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">📄 Relatório PDF — Performance Semanal</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;">Escolha o período. Os números são calculados a partir dos dados reais do sistema.</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+          <button class="btn small secondary" id="relPdfSemPass">Semana passada (seg–dom)</button>
+          <button class="btn small secondary" id="relPdfUlt7">Últimos 7 dias</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div class="form-row" style="flex:1;min-width:140px;"><label>De</label><input type="date" id="relPdfDe" value="${pad0.de}"></div>
+          <div class="form-row" style="flex:1;min-width:140px;"><label>Até</label><input type="date" id="relPdfAte" value="${pad0.ate}"></div>
+        </div>
+        <div id="relPdfErr" style="color:var(--bad);font-size:12.5px;min-height:16px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn" id="relPdfGerar" style="flex:1;">Gerar relatório</button>
+          <button class="btn secondary" id="relPdfCancel" style="flex:1;">Cancelar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const setP = p=>{ document.getElementById('relPdfDe').value=p.de; document.getElementById('relPdfAte').value=p.ate; };
+    document.getElementById('relPdfSemPass').onclick = ()=>setP(semanaPassada());
+    document.getElementById('relPdfUlt7').onclick = ()=>setP(ultimos7());
+    document.getElementById('relPdfCancel').onclick = ()=>ov.remove();
+    ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+    document.getElementById('relPdfGerar').onclick = ()=>{
+      const de = document.getElementById('relPdfDe').value, ate = document.getElementById('relPdfAte').value;
+      const err = document.getElementById('relPdfErr');
+      if(!de || !ate){ err.textContent='Informe as duas datas.'; return; }
+      if(de > ate){ err.textContent='A data inicial deve ser anterior à final.'; return; }
+      if(diasDoPeriodo(de,ate).length > MAX_DIAS){ err.textContent='Período máximo: '+MAX_DIAS+' dias.'; return; }
+      ov.remove();
+      gerarRelatorio(de, ate);
+    };
+  }
+
+  async function gerarRelatorio(de, ate){
+    // Abre a aba já no clique (evita bloqueio de pop-up) e preenche depois
+    const w = window.open('', '_blank');
+    if(!w){ alert('O navegador bloqueou a nova aba. Permita pop-ups para este site e tente novamente.'); return; }
+    w.document.write('<html><head><title>Gerando relatório…</title></head><body style="font-family:Segoe UI,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:90vh;color:#2D3277;"><div style="text-align:center"><div style="font-size:34px">📄</div><div style="font-size:16px;font-weight:700;margin-top:8px">Gerando relatório…</div><div style="font-size:12px;color:#6b7280;margin-top:4px">Calculando os indicadores do período</div></div></body></html>');
+    try{
+      const dados = await coletarDados(de, ate);
+      const html = montarHTML(dados);
+      w.document.open(); w.document.write(html); w.document.close();
+    }catch(e){
+      console.error('[Relatório PDF] Falha ao gerar', e);
+      w.document.open();
+      w.document.write('<html><body style="font-family:Arial;padding:40px;color:#b91c1c"><h3>Não foi possível gerar o relatório.</h3><p>'+esc(e && e.message || e)+'</p><p>Verifique a conexão e tente novamente.</p></body></html>');
+      w.document.close();
+    }
+  }
+
+  // Mesmo cálculo de absenteísmo, reutilizado pelo consolidado semanal da aba Efetivo
+  window.relAbsenteismo = calcAbsenteismo;
+
+  // ── Botão na aba "Relatório" ──────────────────────────────────────
+  if(typeof renderReport === 'function'){
+    const _origRenderReport = renderReport;
+    renderReport = async function(){
+      const r = await _origRenderReport.apply(this, arguments);
+      const tabs = document.querySelector('#app .req-tabs');
+      if(tabs && !document.getElementById('btnRelPdf')){
+        const b = document.createElement('button');
+        b.id = 'btnRelPdf';
+        b.textContent = '📄 Gerar Relatório PDF – Performance Semanal';
+        b.style.cssText = 'margin-left:auto;background:transparent;border:1px solid rgba(227,179,65,.5);color:#e3b341;';
+        b.addEventListener('click', abrirSeletorPeriodo);
+        tabs.appendChild(b);
+      }
+      return r;
+    };
+  }
+})();
+</script>
+
+<!-- ===== Efetivo — Absenteísmo semanal ===== -->
+<script>
+/* =====================================================================
+   EFETIVO — CONSOLIDADO SEMANAL DE ABSENTEÍSMO
+   ---------------------------------------------------------------------
+   Aparece na aba 👷 Efetivo, logo abaixo do "Consolidado do mês".
+   Usa o MESMO parâmetro do relatório semanal (TURNO_PREVISTO):
+   quadro de 42 pessoas em escala 12x36 → 21 previstas por dia
+   (T1 Manhã 11 + T2 Noite 10), alternando equipes Par/Ímpar.
+   O cálculo é o mesmo do PDF (window.relAbsenteismo). Somente leitura.
+   ===================================================================== */
+(function(){
+  'use strict';
+  const p2 = n => String(n).padStart(2,'0');
+  const ddmm = d => p2(d.getDate())+'/'+p2(d.getMonth()+1);
+  const dsOf = d => d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+  const DIA = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const pct = (a,b) => b>0 ? a/b*100 : null;
+  const fmtPct = v => v==null ? '—' : v.toFixed(1).replace('.',',')+'%';
+
+  let semanaRef = null;   // qualquer data dentro da semana exibida
+
+  function segundaDe(d){
+    const x = new Date(d); x.setHours(0,0,0,0);
+    const w = x.getDay(); x.setDate(x.getDate() - (w===0 ? 6 : w-1));
+    return x;
+  }
+  const quadro = () => Object.values(TURNO_PREVISTO).reduce((s,v)=>s+v,0);
+  const previstoDia = () => (TURNO_PREVISTO.T1D||0) + (TURNO_PREVISTO.T1N||0);
+
+  function injetar(){
+    if(document.getElementById('efSemCard')) return;
+    const consolCard = document.getElementById('consolResult')?.closest('.card');
+    if(!consolCard) return;
+    if(!semanaRef) semanaRef = new Date(currentDate);
+    consolCard.insertAdjacentHTML('afterend', `
+      <div class="section-title" style="margin-top:24px;">Absenteísmo semanal</div>
+      <div class="card" id="efSemCard">
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">
+          <button class="nav-btn" id="efSemPrev" title="Semana anterior">‹</button>
+          <div><label class="lbl-base">SEMANA DE</label>
+            <input type="date" id="efSemData" value="${dsOf(segundaDe(semanaRef))}"
+              style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:7px 12px;border-radius:8px;font-size:13px;font-family:inherit;"></div>
+          <button class="nav-btn" id="efSemNext" title="Próxima semana">›</button>
+          <button class="btn secondary" id="efSemAtual">Semana atual</button>
+          <div id="efSemLbl" style="font-size:12.5px;color:var(--text-dim);"></div>
+        </div>
+        <div id="efSemResult"><div class="loading">Calculando...</div></div>
+      </div>`);
+
+    const irPara = d => { semanaRef = d; document.getElementById('efSemData').value = dsOf(segundaDe(d)); calcular(); };
+    document.getElementById('efSemPrev').onclick = ()=>{ const d=segundaDe(semanaRef); d.setDate(d.getDate()-7); irPara(d); };
+    document.getElementById('efSemNext').onclick = ()=>{ const d=segundaDe(semanaRef); d.setDate(d.getDate()+7); irPara(d); };
+    document.getElementById('efSemAtual').onclick = ()=> irPara(getOperationalDate());
+    document.getElementById('efSemData').onchange = e=>{
+      if(!e.target.value) return;
+      const [y,m,d] = e.target.value.split('-').map(Number);
+      irPara(new Date(y,m-1,d));
+    };
+    calcular();
+  }
+
+  async function calcular(){
+    const out = document.getElementById('efSemResult');
+    if(!out) return;
+    if(typeof window.relAbsenteismo !== 'function'){
+      out.innerHTML = '<div class="empty-state">Cálculo indisponível (módulo do relatório não carregado).</div>'; return;
+    }
+    const seg = segundaDe(semanaRef);
+    const dias = Array.from({length:7}, (_,i)=>{ const d=new Date(seg); d.setDate(seg.getDate()+i); return d; });
+    const lbl = document.getElementById('efSemLbl');
+    if(lbl) lbl.textContent = 'Seg '+ddmm(dias[0])+' a Dom '+ddmm(dias[6])+'/'+dias[6].getFullYear();
+    out.innerHTML = '<div class="loading">Calculando...</div>';
+
+    let linhas;
+    try{ linhas = await window.relAbsenteismo(dias); }
+    catch(e){
+      console.error('[Efetivo semanal] falha', e);
+      out.innerHTML = '<div class="empty-state" style="color:var(--bad);">Não foi possível calcular (falha de conexão). Tente novamente.</div>';
+      return;
+    }
+    if(!document.getElementById('efSemResult')) return;   // usuário saiu da tela
+
+    const T = {T1:{prev:0,pres:0,aus:0}, T2:{prev:0,pres:0,aus:0}};
+    let semLanc = 0;
+    linhas.forEach(r=>{
+      if(r.futuro) return;
+      ['T1','T2'].forEach(g=>{
+        if(r[g].lanc){ T[g].prev+=r[g].prev; T[g].pres+=r[g].pres; T[g].aus+=r[g].aus; }
+        else semLanc++;
+      });
+    });
+    const tot = {prev:T.T1.prev+T.T2.prev, pres:T.T1.pres+T.T2.pres, aus:T.T1.aus+T.T2.aus};
+    const absTot = pct(tot.aus, tot.prev);
+
+    const celulas = t => t.lanc
+      ? `<td class="num">${t.prev}</td><td class="num">${t.pres}</td><td class="num">${t.aus}</td><td class="num" style="font-weight:700;">${fmtPct(pct(t.aus,t.prev))}</td>`
+      : `<td colspan="4" style="text-align:center;color:var(--text-dim);font-size:11.5px;">sem lançamento</td>`;
+    const corpo = linhas.map(r=>{
+      const dia = DIA[r.d.getDay()]+' '+ddmm(r.d);
+      if(r.futuro) return `<tr style="opacity:.5;"><td>${dia}</td><td colspan="9" style="text-align:center;color:var(--text-dim);">Período futuro</td></tr>`;
+      const tp=(r.T1.lanc?r.T1.prev:0)+(r.T2.lanc?r.T2.prev:0), ta=(r.T1.lanc?r.T1.aus:0)+(r.T2.lanc?r.T2.aus:0);
+      return `<tr><td style="white-space:nowrap;">${dia}</td>${celulas(r.T1)}${celulas(r.T2)}<td class="num" style="font-weight:700;">${tp?fmtPct(pct(ta,tp)):'—'}</td></tr>`;
+    }).join('');
+
+    out.innerHTML = `
+      <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="stat-box"><div class="num">${quadro()}</div><div class="lbl">Quadro (12x36)</div></div>
+        <div class="stat-box"><div class="num">${tot.prev}</div><div class="lbl">Previsto na semana</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--ok);">${tot.pres}</div><div class="lbl">Presentes</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--bad);">${tot.aus}</div><div class="lbl">Ausentes</div></div>
+        <div class="stat-box"><div class="num">${fmtPct(absTot)}</div><div class="lbl">Absenteísmo</div>
+          <div style="font-size:11.5px;color:var(--text-dim);margin-top:4px;">T1: ${fmtPct(pct(T.T1.aus,T.T1.prev))} · T2: ${fmtPct(pct(T.T2.aus,T.T2.prev))}</div></div>
+      </div>
+      <div class="tablewrap"><table class="report-table">
+        <thead>
+          <tr><th rowspan="2">Dia</th><th colspan="4" style="text-align:center;">T1 (Manhã)</th><th colspan="4" style="text-align:center;">T2 (Noite)</th><th rowspan="2" class="num">Total %</th></tr>
+          <tr><th class="num">Previsto</th><th class="num">Presentes</th><th class="num">Ausentes</th><th class="num">%</th>
+              <th class="num">Previsto</th><th class="num">Presentes</th><th class="num">Ausentes</th><th class="num">%</th></tr>
+        </thead>
+        <tbody>${corpo}
+          <tr style="background:var(--panel-2);font-weight:700;"><td>Total da semana</td>
+            <td class="num">${T.T1.prev}</td><td class="num">${T.T1.pres}</td><td class="num">${T.T1.aus}</td><td class="num">${fmtPct(pct(T.T1.aus,T.T1.prev))}</td>
+            <td class="num">${T.T2.prev}</td><td class="num">${T.T2.pres}</td><td class="num">${T.T2.aus}</td><td class="num">${fmtPct(pct(T.T2.aus,T.T2.prev))}</td>
+            <td class="num">${fmtPct(absTot)}</td></tr>
+        </tbody>
+      </table></div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:10px;line-height:1.5;">
+        Quadro de ${quadro()} pessoas em escala 12x36: ${previstoDia()} previstas por dia (T1 Manhã ${TURNO_PREVISTO.T1D} + T2 Noite ${TURNO_PREVISTO.T1N}), alternando as equipes Par e Ímpar — mesmo parâmetro do relatório semanal.
+        Absenteísmo = (previsto − presentes) ÷ previsto.${semLanc ? ` ${semLanc} turno(s) sem lançamento de efetivo não entraram no cálculo.` : ''}
+      </div>`;
+  }
+
+  if(typeof renderEfetivo === 'function'){
+    const _orig = renderEfetivo;
+    renderEfetivo = async function(){
+      const r = await _orig.apply(this, arguments);
+      try{ injetar(); }catch(e){ console.error('[Efetivo semanal]', e); }
+      return r;
+    };
+  }
+})();
+</script>
 </body>
 </html>
