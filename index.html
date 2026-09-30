@@ -7325,5 +7325,565 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
   }
 })();
 </script>
+
+<!-- ===== Áreas e Periodicidades (cadastro administrativo) ===== -->
+<script>
+/* =====================================================================
+   ÁREAS E PERIODICIDADES — cadastro administrativo do Plano de Limpeza
+   ---------------------------------------------------------------------
+   Firebase (mesmo banco/projeto, sem nova configuração):
+     sistema_limpeza/areasPlano/versoes/{AAAA-MM-DD}
+         { areas:{ <id>: {nome, ativo, ordem, banheiro,
+                          turnos:{ T1:{periodicidade, quadros, dias, paridade, janelas},
+                                   T2:{...} } } },
+           salvoEm, salvoPor, formato:2 }
+     sistema_limpeza/areasPlano/log/{pushId}   (trilha das alterações)
+
+   Cada versão vale a partir da sua data (operacional). O Plano de
+   Limpeza de um dia usa a última versão com data <= aquele dia; datas
+   anteriores à primeira versão continuam usando a configuração antiga
+   (código original), preservando os indicadores já fechados.
+
+   Migração: na primeira carga, se ainda não houver versões, a lista
+   atual do código (LOCATIONS) é convertida automaticamente, 1 vez só
+   (transação — nunca duplica).
+   ===================================================================== */
+(function(){
+  'use strict';
+
+  const BASE = fbRoot.child('areasPlano');
+  const VERSOES = BASE.child('versoes');
+  const LOG = BASE.child('log');
+  const DIA_ABREV = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const KEYS = { T1:{par:'T1D', impar:'T2D'}, T2:{par:'T1N', impar:'T2N'} };
+  const TURNO_LBL = { T1:'T1 (Manhã)', T2:'T2 (Noite)' };
+  const MAX_Q = { diaria:12, semanal:7 };
+  const params = new URLSearchParams(location.search);
+  const KIOSK = params.get('tab')==='requests' || params.get('kiosk')==='1';
+
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+  const limpaNome = s => String(s||'').replace(/\s+/g,' ').trim();
+  const novoId = () => 'a'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  const hojeOp = () => dateStr(getOperationalDate());
+
+  /* ------------------------------------------------------------------
+     Modelo: 1 cadastro por área, com a configuração de cada turno
+       { id, nome, ativo, ordem, banheiro,
+         turnos: { T1: {periodicidade, quadros, dias, paridade, janelas},
+                   T2: {...} } }
+     (versões antigas gravadas "1 linha por turno" são convertidas na leitura)
+     ------------------------------------------------------------------ */
+  let versoes = [];          // [{ds, areas:{...}, locs:[...], salvoPor}] ordenado por ds
+  let carregado = false;
+
+  function versaoPara(ds){
+    let v = null;
+    for(const x of versoes){ if(x.ds <= ds) v = x; else break; }
+    return v;
+  }
+  const versaoAtual = () => versoes.length ? versoes[versoes.length-1] : null;
+  const areasAtuais = () => { const v = versaoAtual(); return v ? Object.values(v.areas||{}) : []; };
+  const porOrdem = (a,b) => (a.ordem||0)-(b.ordem||0);
+  const clone = o => JSON.parse(JSON.stringify(o));
+
+  // Converte o formato antigo (1 linha por turno) no formato de 1 cadastro por área
+  function linhasParaAreas(linhas){
+    const areas = {}, porNome = new Map();
+    Object.values(linhas||{}).filter(Boolean).sort(porOrdem).forEach(l=>{
+      const k = norm(l.nome);
+      let a = porNome.get(k);
+      if(!a){ a = {id:l.id, nome:l.nome, ativo:false, ordem:l.ordem||0, turnos:{}, _tInat:{}}; porNome.set(k,a); areas[a.id] = a; }
+      if(l.banheiro) a.banheiro = true;
+      const cfg = {periodicidade:l.periodicidade, quadros:l.quadros, paridade:l.paridade||'todos'};
+      if(l.dias) cfg.dias = l.dias;
+      if(l.janelas) cfg.janelas = l.janelas;
+      if(l.ativo!==false){
+        if(!a.ativo){ a.ativo = true; a.turnos = {}; }       // descarta turnos que só existiam em linhas inativas
+        if(!a.turnos[l.turno]) a.turnos[l.turno] = cfg;
+      } else if(!a.ativo && !a.turnos[l.turno]) a.turnos[l.turno] = cfg;
+    });
+    Object.values(areas).forEach(a=>delete a._tInat);
+    return areas;
+  }
+  const normalizaVersao = val => val && val.areas ? val.areas : linhasParaAreas(val && val.linhas);
+
+  /* ------------------------------------------------------------------
+     Conversão cadastro → formato usado pelo Plano de Limpeza
+     ------------------------------------------------------------------ */
+  function valorFreq(c){
+    return c.periodicidade==='semanal' ? 'wk:'+(c.dias||[]).slice().sort((a,b)=>a-b).join(',') : (parseInt(c.quadros,10)||0);
+  }
+  function montarLocs(areas){
+    return Object.values(areas||{}).filter(a=>a && a.ativo!==false && a.turnos && Object.keys(a.turnos).length)
+      .sort(porOrdem).map(a=>{
+        const loc = {name:a.nome, f:{T1D:0,T2D:0,T1N:0,T2N:0}};
+        ['T1','T2'].forEach(t=>{
+          const c = a.turnos[t]; if(!c) return;
+          const k = KEYS[t];
+          const alvo = c.paridade==='par' ? [k.par] : c.paridade==='impar' ? [k.impar] : [k.par, k.impar];
+          alvo.forEach(key=>{ loc.f[key] = valorFreq(c); });
+          if(Array.isArray(c.janelas) && c.janelas.length){ loc.meals = loc.meals || {}; alvo.forEach(key=>{ loc.meals[key] = c.janelas; }); }
+        });
+        if(a.banheiro) loc.banheiro = true;
+        return loc;
+      });
+  }
+
+  /* ------------------------------------------------------------------
+     Migração automática da lista atual do código
+     ------------------------------------------------------------------ */
+  function normalizaValor(v){
+    if(typeof v==='number' && v>0) return {periodicidade:'diaria', quadros:v};
+    if(v==='3pw') return {periodicidade:'semanal', quadros:3, dias:[1,3,5]};
+    if(typeof v==='string' && v.startsWith('wk:')){
+      const dias = v.slice(3).split(',').map(Number).filter(n=>n>=0&&n<=6);
+      return dias.length ? {periodicidade:'semanal', quadros:dias.length, dias} : null;
+    }
+    return null;
+  }
+  const _isBathroomOrig = isBathroomLoc;
+  function areasDaListaDoCodigo(){
+    const areas = {}; let ordem = 0;
+    LOCATIONS.forEach(loc=>{
+      const id = novoId()+ordem;
+      const a = { id, nome:loc.name, ativo:true, ordem: ordem++, turnos:{}, criadoEm: Date.now(), origem:'migracao' };
+      if(_isBathroomOrig(loc)) a.banheiro = true;
+      ['T1','T2'].forEach(t=>{
+        const k = KEYS[t];
+        const vp = normalizaValor(loc.f[k.par]), vi = normalizaValor(loc.f[k.impar]);
+        if(!vp && !vi) return;
+        let cfg;
+        if(vp && vi){
+          if(JSON.stringify(vp)!==JSON.stringify(vi)) console.warn('[Áreas] '+loc.name+' '+t+': pares e ímpares diferentes — mantida a regra dos dias pares');
+          cfg = Object.assign({paridade:'todos'}, vp);
+        } else cfg = Object.assign({paridade: vp?'par':'impar'}, vp||vi);
+        const jan = loc.meals ? (loc.meals[k.par] || loc.meals[k.impar]) : null;
+        if(jan) cfg.janelas = jan;
+        a.turnos[t] = cfg;
+      });
+      areas[id] = a;
+    });
+    return areas;
+  }
+  async function migrarSeNecessario(){
+    const ds = hojeOp();
+    try{
+      const res = await VERSOES.transaction(cur=>{
+        if(cur) return;                       // já migrado — não faz nada
+        return { [ds]: { areas: areasDaListaDoCodigo(), salvoEm: Date.now(), salvoPor: 'Migração automática', formato:2 } };
+      });
+      if(res && res.committed){
+        LOG.push({acao:'migracao', ts: firebase.database.ServerValue.TIMESTAMP, por:'Sistema',
+                  detalhe:'Áreas migradas da lista do código para o cadastro administrativo'});
+      }
+    }catch(e){ console.error('[Áreas] Falha na migração', e); }
+  }
+
+  /* ------------------------------------------------------------------
+     Integração com o Plano de Limpeza (sem mexer no código original)
+     ------------------------------------------------------------------ */
+  const _getLocOrig = getLocationsForDate;
+  getLocationsForDate = function(date){
+    const v = versaoPara(dateStr(date));
+    return v ? v.locs : _getLocOrig(date);
+  };
+  isBathroomLoc = function(loc){ return (loc && loc.banheiro===true) || _isBathroomOrig(loc); };
+
+  function atualizarListaSolicitacoes(){
+    const v = versaoAtual(); if(!v) return;
+    const nomes = [...new Set(v.locs.map(l=>l.name))];
+    const docas = LOCATION_NAMES.filter(n=>/^Doca \d+$/.test(n));
+    const novos = nomes.concat(docas, ['Outro / não listado']);
+    LOCATION_NAMES.length = 0; novos.forEach(n=>LOCATION_NAMES.push(n));
+  }
+
+  let _rerenderT = null;
+  function aoMudarConfig(){
+    atualizarListaSolicitacoes();
+    clearTimeout(_rerenderT);
+    _rerenderT = setTimeout(()=>{
+      if(section==='checklist'){ try{ renderChecklist(); }catch(e){} }
+      if(section==='areas'){ desenharLista(); }
+    }, 250);
+  }
+
+  VERSOES.on('value', snap=>{
+    const val = snap.val();
+    if(!val){ if(!carregado){ carregado = true; migrarSeNecessario(); } return; }
+    versoes = Object.keys(val).sort().map(ds=>{
+      const areas = normalizaVersao(val[ds]);
+      return { ds, areas, locs: montarLocs(areas), salvoPor: val[ds].salvoPor };
+    });
+    carregado = true;
+    aoMudarConfig();
+  }, err=>console.error('[Áreas] Falha ao ler configurações', err));
+
+  /* ------------------------------------------------------------------
+     Gravação (transação na versão de HOJE; baseada na última versão)
+     ------------------------------------------------------------------ */
+  async function salvarAlteracao(aplicar, logInfo){
+    if(!isAdmin) throw new Error('Ação restrita ao administrador.');
+    const ds = hojeOp();
+    const anterior = (()=>{ let v=null; for(const x of versoes){ if(x.ds < ds) v=x; } return v; })();
+    const quem = (currentUser && currentUser.nome) || 'Admin (senha geral)';
+    const res = await withTimeout(VERSOES.child(ds).transaction(cur=>{
+      const base = clone(cur ? normalizaVersao(cur) : (anterior ? anterior.areas : {}));
+      if(aplicar(base)) return;              // retornou erro → aborta sem gravar
+      return { areas: base, salvoEm: Date.now(), salvoPor: quem, formato:2 };
+    }), 15000);
+    if(!res.committed) throw new Error('A alteração não foi aplicada (conflito com outro cadastro). Revise e tente de novo.');
+    LOG.push(Object.assign({ts: firebase.database.ServerValue.TIMESTAMP, por: quem, vigencia: ds}, logInfo));
+  }
+
+  // Ao renomear, as marcações de HOJE feitas com o nome antigo acompanham o novo nome
+  async function migrarMarcacoesDeHoje(nomeAntigo, nomeNovo){
+    const ref = fbRoot.child(encodeKey('checklist:'+hojeOp()));
+    try{
+      await withTimeout(ref.transaction(v=>{
+        if(!v) return v;
+        let obj; try{ obj = JSON.parse(v); }catch(e){ return; }
+        let mudou = false;
+        Object.keys(obj).forEach(k=>{
+          const [n, tk, i] = k.split('|');
+          if(n===nomeAntigo){
+            const nk = nomeNovo+'|'+tk+'|'+i;
+            if(!(nk in obj)) obj[nk] = obj[k];
+            delete obj[k]; mudou = true;
+          }
+        });
+        return mudou ? JSON.stringify(obj) : v;
+      }), 15000);
+    }catch(e){ console.warn('[Áreas] Não foi possível mover as marcações de hoje', e); }
+  }
+
+  /* ------------------------------------------------------------------
+     Apoio visual
+     ------------------------------------------------------------------ */
+  function descricao(c){
+    const q = parseInt(c.quadros,10)||0;
+    const txt = q+' quadro'+(q===1?'':'s')+' de limpeza por '+(c.periodicidade==='semanal'?'semana':'dia');
+    return c.periodicidade==='semanal' && c.dias && c.dias.length
+      ? txt+' ('+c.dias.slice().sort((a,b)=>a-b).map(d=>DIA_ABREV[d]).join(', ')+')' : txt;
+  }
+  const quadrosVis = q => { q = parseInt(q,10)||0;
+    return q<=8 ? '<span class="ap-q">'+'<i></i>'.repeat(q)+'</span>'
+                : '<span class="ap-q">'+'<i></i>'.repeat(3)+'</span> <b style="font-size:12px;">× '+q+'</b>'; };
+  const PARIDADE_LBL = {todos:'Todos os dias', par:'Somente dias pares', impar:'Somente dias ímpares'};
+  const turnosDe = a => ['T1','T2'].filter(t=>a.turnos && a.turnos[t]);
+
+  /* ------------------------------------------------------------------
+     Tela administrativa
+     ------------------------------------------------------------------ */
+  const style = document.createElement('style');
+  style.textContent = `
+    .ap-q{display:inline-flex;gap:3px;vertical-align:middle}
+    .ap-q i{display:inline-block;width:14px;height:14px;border-radius:3px;background:var(--teal);border:1px solid var(--teal-bright);opacity:.9}
+    .ap-tag{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:10px;background:var(--panel-2);color:var(--text-dim);margin:2px 4px 0 0}
+    .ap-t{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;margin:0 4px 3px 0;background:rgba(63,214,201,.12);color:var(--teal-bright);white-space:nowrap}
+    .ap-t.t2{background:rgba(167,139,250,.15);color:#a78bfa}
+    .ap-ln{display:flex;align-items:center;gap:6px;min-height:24px}
+    .ap-ln+.ap-ln{margin-top:4px}
+    .ap-st{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+    .ap-st.on{background:rgba(76,175,110,.18);color:var(--ok)}
+    .ap-st.off{background:rgba(255,255,255,.08);color:var(--text-dim)}
+    .ap-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+    .ap-tools input,.ap-tools select{background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;font-family:inherit}
+    .ap-tools input{flex:1;min-width:200px}
+    tr.ap-inativa td{opacity:.55}
+    .ap-chip{border:1px solid var(--line);background:var(--panel-2);color:var(--text-dim);padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;min-width:46px}
+    .ap-chip.on{background:var(--teal);border-color:var(--teal);color:#06211f}
+    .ap-step{align-self:flex-start;display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+    .ap-step button{background:var(--panel-2);border:none;color:var(--text);width:40px;height:40px;font-size:18px;cursor:pointer}
+    .ap-step input{width:56px !important;height:40px;text-align:center;background:var(--panel) !important;border:none !important;border-left:1px solid var(--line) !important;border-right:1px solid var(--line) !important;border-radius:0 !important;color:var(--text);font-size:16px;font-weight:700;font-family:inherit;padding:0 !important}
+    .ap-bloco{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:rgba(0,0,0,.12)}
+    .ap-bloco h4{margin:0 0 10px;font-size:13.5px;color:var(--teal-bright)}
+    .ap-bloco.t2 h4{color:#a78bfa}
+    .ap-prev{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:4px}
+    .ap-prev .ap-q i{width:17px;height:17px}
+    @media (max-width:767px){ .ap-tools input,.ap-tools select{font-size:16px} }
+  `;
+  document.head.appendChild(style);
+
+  let filtroTxt = '', filtroSt = 'todas';
+
+  async function renderAreas(){
+    const app = document.getElementById('app');
+    if(!isAdmin){ app.innerHTML = '<div class="empty-state" style="margin-top:40px;">⛔ Acesso restrito ao administrador.</div>'; return; }
+    app.innerHTML = `
+      <div style="max-width:1100px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+          <div><div style="font-size:18px;font-weight:700;">🗂️ Áreas e Periodicidades</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-top:2px;">Fonte oficial das áreas do Plano de Limpeza. Alterações valem a partir de hoje; dias anteriores mantêm a configuração da época.</div></div>
+          <button class="btn" id="apNova">+ Nova área</button>
+        </div>
+        <div class="ap-tools">
+          <input type="text" id="apBusca" placeholder="🔍 Buscar área..." value="${esc(filtroTxt)}">
+          <select id="apStatus">
+            <option value="todas" ${filtroSt==='todas'?'selected':''}>Todas</option>
+            <option value="ativas" ${filtroSt==='ativas'?'selected':''}>Ativas</option>
+            <option value="inativas" ${filtroSt==='inativas'?'selected':''}>Inativas</option>
+          </select>
+        </div>
+        <div id="apLista"><div class="loading">Carregando áreas...</div></div>
+      </div>`;
+    document.getElementById('apNova').onclick = ()=>abrirModal(null);
+    document.getElementById('apBusca').oninput = e=>{ filtroTxt = e.target.value; desenharLista(); };
+    document.getElementById('apStatus').onchange = e=>{ filtroSt = e.target.value; desenharLista(); };
+    desenharLista();
+  }
+
+  function desenharLista(){
+    const out = document.getElementById('apLista'); if(!out) return;
+    if(!carregado || !versaoAtual()){ out.innerHTML = '<div class="loading">Carregando áreas...</div>'; return; }
+    const q = norm(filtroTxt);
+    const todas = areasAtuais().sort(porOrdem);
+    const lista = todas.filter(a=>{
+      if(q && !norm(a.nome).includes(q)) return false;
+      if(filtroSt==='ativas' && a.ativo===false) return false;
+      if(filtroSt==='inativas' && a.ativo!==false) return false;
+      return true;
+    });
+    const nAt = todas.filter(a=>a.ativo!==false).length;
+    const v = versaoAtual();
+    const linhaT = (a, fn) => turnosDe(a).map(t=>`<div class="ap-ln"><span class="ap-t ${t==='T2'?'t2':''}">${t}</span>${fn(a.turnos[t])}</div>`).join('') || '<span style="color:var(--text-dim)">—</span>';
+    out.innerHTML = `
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px;">
+        ${nAt} área(s) ativa(s) · ${todas.length-nAt} inativa(s) · última alteração: ${esc(v.ds.split('-').reverse().join('/'))}${v.salvoPor?' por '+esc(v.salvoPor):''}
+      </div>
+      ${lista.length ? `<div class="tablewrap"><table class="report-table">
+        <thead><tr><th>Área</th><th>Turno</th><th>Periodicidade</th><th>Quadros</th><th>Status</th><th style="text-align:right;">Ações</th></tr></thead>
+        <tbody>${lista.map(a=>{
+          const tags = [];
+          if(a.banheiro) tags.push('🚻 regra de banheiro');
+          if(turnosDe(a).some(t=>a.turnos[t].janelas)) tags.push('🍽 horários de refeição');
+          turnosDe(a).forEach(t=>{ const p=a.turnos[t].paridade; if(p && p!=='todos') tags.push(t+': '+PARIDADE_LBL[p].toLowerCase()); });
+          return `<tr class="${a.ativo===false?'ap-inativa':''}">
+            <td><div style="font-weight:600;">${esc(a.nome)}</div>${tags.map(t=>`<span class="ap-tag">${esc(t)}</span>`).join('')}</td>
+            <td style="white-space:nowrap;">${turnosDe(a).map(t=>`<span class="ap-t ${t==='T2'?'t2':''}">${TURNO_LBL[t]}</span>`).join('<br>')||'—'}</td>
+            <td>${linhaT(a, c=>`<span>${c.periodicidade==='semanal'?'Semanal':'Diária'} <span style="font-size:11px;color:var(--text-dim);">· ${esc(descricao(c))}</span></span>`)}</td>
+            <td style="white-space:nowrap;">${linhaT(a, c=>quadrosVis(c.quadros))}</td>
+            <td><span class="ap-st ${a.ativo===false?'off':'on'}">${a.ativo===false?'Inativa':'Ativa'}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="btn small secondary" data-ap-edit="${esc(a.id)}">Editar</button>
+              <button class="btn small secondary" data-ap-tog="${esc(a.id)}" style="${a.ativo===false?'color:var(--ok);border-color:var(--ok);':'color:var(--bad);border-color:var(--bad);'}">${a.ativo===false?'Reativar':'Inativar'}</button>
+            </td></tr>`;
+        }).join('')}</tbody></table></div>`
+      : '<div class="empty-state">Nenhuma área encontrada.</div>'}`;
+
+    out.querySelectorAll('[data-ap-edit]').forEach(b=>b.onclick = ()=>{
+      const a = areasAtuais().find(x=>x.id===b.getAttribute('data-ap-edit')); if(a) abrirModal(a);
+    });
+    out.querySelectorAll('[data-ap-tog]').forEach(b=>b.onclick = ()=>alternarAtivo(b.getAttribute('data-ap-tog')));
+  }
+
+  async function alternarAtivo(id){
+    const a = areasAtuais().find(x=>x.id===id); if(!a) return;
+    const ativar = a.ativo===false;
+    if(ativar && !turnosDe(a).length){ alert('Edite a área e marque ao menos um turno antes de reativar.'); return; }
+    const msg = ativar
+      ? 'Reativar "'+a.nome+'"?\nA área volta ao Plano de Limpeza a partir de hoje ('+turnosDe(a).join(' e ')+').'
+      : 'Inativar "'+a.nome+'" ('+turnosDe(a).join(' e ')+')?\n\nA área deixa de aparecer no Plano de Limpeza a partir de hoje.\nO histórico dos dias anteriores é preservado e ela pode ser reativada depois.';
+    if(!confirm(msg)) return;
+    try{
+      await salvarAlteracao(areas=>{
+        const x = areas[id]; if(!x) return 'não encontrada';
+        x.ativo = ativar; x.atualizadoEm = Date.now();
+      }, {acao: ativar?'reativou':'inativou', areaId:id, nome:a.nome});
+    }catch(e){ alert('❌ '+(e.message||'Não foi possível salvar.')); }
+  }
+
+  function abrirModal(area){
+    document.getElementById('apModal')?.remove();
+    const editando = !!area;
+    const padrao = () => ({periodicidade:'diaria', quadros:1, dias:[], paridade:'todos'});
+    const cfgDe = c => c ? {periodicidade:c.periodicidade||'diaria', quadros:parseInt(c.quadros,10)||1,
+                            dias:(c.dias||[]).slice(), paridade:c.paridade||'todos'} : null;
+    const st = {
+      nome: area ? area.nome : '',
+      turnos: area ? {T1: cfgDe(area.turnos.T1), T2: cfgDe(area.turnos.T2)} : {T1: padrao(), T2: null},
+    };
+    const ov = document.createElement('div');
+    ov.id = 'apModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;">
+        <div style="font-size:16px;font-weight:700;margin-bottom:14px;">${editando?'✏️ Editar área':'+ Nova área'}</div>
+        <div class="form-row"><label>Nome da área *</label>
+          <input type="text" id="apNome" maxlength="60" value="${esc(st.nome)}" placeholder="Ex.: Refeitório">
+        </div>
+        <div class="form-row"><label>Turnos *</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${['T1','T2'].map(t=>`<button type="button" class="ap-chip" data-turno="${t}">${TURNO_LBL[t]}</button>`).join('')}
+          </div>
+          <div style="font-size:11.5px;color:var(--text-dim);">Marque os turnos em que a área é limpa. Cada turno pode ter periodicidade e quadros próprios.</div>
+        </div>
+        <div id="apBlocos"></div>
+        <div id="apErr" style="color:var(--bad);font-size:12.5px;min-height:18px;margin-top:4px;"></div>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <button class="btn" id="apSalvar" style="flex:1;">Salvar</button>
+          <button class="btn secondary" id="apCancelar" style="flex:1;">Cancelar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const $ = id => document.getElementById(id);
+
+    function blocoHtml(t){
+      const c = st.turnos[t];
+      return `<div class="ap-bloco ${t==='T2'?'t2':''}" data-bloco="${t}">
+        <h4>${TURNO_LBL[t]}</h4>
+        <div class="form-row"><label>Periodicidade</label>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="ap-chip ${c.periodicidade==='diaria'?'on':''}" data-per="diaria">Diária</button>
+            <button type="button" class="ap-chip ${c.periodicidade==='semanal'?'on':''}" data-per="semanal">Semanal</button>
+          </div></div>
+        <div class="form-row"><label>Quantidade de quadros</label>
+          <div class="ap-step"><button type="button" data-q="-1">−</button><input type="text" inputmode="numeric" data-qin value="${c.quadros}"><button type="button" data-q="1">+</button></div></div>
+        ${c.periodicidade==='semanal' ? `<div class="form-row"><label>Dias da semana <span style="font-weight:400;">— selecione ${c.quadros} dia(s) (${c.dias.length} selecionado(s))</span></label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">${DIA_ABREV.map((d,i)=>`<button type="button" class="ap-chip ${c.dias.includes(i)?'on':''}" data-dia="${i}">${d}</button>`).join('')}</div></div>` : ''}
+        <div class="form-row"><label>Aplica-se a</label>
+          <select data-par>${Object.entries(PARIDADE_LBL).map(([k,v])=>`<option value="${k}" ${c.paridade===k?'selected':''}>${v}</option>`).join('')}</select></div>
+        <div class="ap-prev">${quadrosVis(c.quadros)}<div style="font-size:13px;font-weight:600;margin-top:6px;">${esc(descricao(c))}</div></div>
+      </div>`;
+    }
+    function desenhar(){
+      ['T1','T2'].forEach(t=>{
+        const c = st.turnos[t]; if(!c) return;
+        const max = MAX_Q[c.periodicidade];
+        c.quadros = Math.min(max, Math.max(1, parseInt(c.quadros,10)||1));
+        if(c.periodicidade!=='semanal') c.dias = [];
+      });
+      ov.querySelectorAll('[data-turno]').forEach(b=>b.classList.toggle('on', !!st.turnos[b.dataset.turno]));
+      $('apBlocos').innerHTML = ['T1','T2'].filter(t=>st.turnos[t]).map(blocoHtml).join('');
+      ov.querySelectorAll('[data-bloco]').forEach(bl=>{
+        const c = st.turnos[bl.dataset.bloco];
+        bl.querySelectorAll('[data-per]').forEach(b=>b.onclick = ()=>{ c.periodicidade = b.dataset.per; desenhar(); });
+        bl.querySelectorAll('[data-q]').forEach(b=>b.onclick = ()=>{ c.quadros += parseInt(b.dataset.q,10); desenhar(); });
+        const qin = bl.querySelector('[data-qin]');
+        qin.oninput = ()=>{ qin.value = qin.value.replace(/\D/g,''); };
+        qin.onchange = ()=>{ c.quadros = parseInt(qin.value,10)||1; desenhar(); };
+        bl.querySelectorAll('[data-dia]').forEach(b=>b.onclick = ()=>{
+          const d = +b.dataset.dia;
+          c.dias = c.dias.includes(d) ? c.dias.filter(x=>x!==d) : c.dias.concat(d);
+          if(c.dias.length > c.quadros) c.quadros = c.dias.length;
+          desenhar();
+        });
+        bl.querySelector('[data-par]').onchange = e=>{ c.paridade = e.target.value; };
+      });
+    }
+    ov.querySelectorAll('[data-turno]').forEach(b=>b.onclick = ()=>{
+      const t = b.dataset.turno, outro = t==='T1'?'T2':'T1';
+      if(st.turnos[t]){ st.turnos[t] = null; }
+      else st.turnos[t] = st.turnos[outro] ? clone(st.turnos[outro]) : padrao();   // já vem com a config do outro turno
+      desenhar();
+    });
+    $('apCancelar').onclick = ()=>ov.remove();
+    ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+    desenhar();
+
+    $('apSalvar').onclick = async ()=>{
+      const err = $('apErr'); err.textContent = '';
+      ov.querySelectorAll('[data-qin]').forEach(inp=>{ const t = inp.closest('[data-bloco]').dataset.bloco; st.turnos[t].quadros = parseInt(inp.value,10)||1; });
+      const nome = limpaNome($('apNome').value);
+      if(!nome){ err.textContent = 'Informe o nome da área.'; return; }
+      if(nome.includes('|')){ err.textContent = 'O nome não pode conter o caractere "|".'; return; }
+      const ts = ['T1','T2'].filter(t=>st.turnos[t]);
+      if(!ts.length){ err.textContent = 'Marque ao menos um turno.'; return; }
+      for(const t of ts){
+        const c = st.turnos[t];
+        if(!Number.isInteger(c.quadros) || c.quadros<1 || c.quadros>MAX_Q[c.periodicidade]){ err.textContent = TURNO_LBL[t]+': quantidade de quadros inválida.'; return; }
+        if(c.periodicidade==='semanal' && c.dias.length!==c.quadros){ err.textContent = TURNO_LBL[t]+': selecione exatamente '+c.quadros+' dia(s) da semana (1 quadro por dia).'; return; }
+      }
+      const dup = areasAtuais().find(a=>norm(a.nome)===norm(nome) && (!editando || a.id!==area.id));
+      if(dup){ err.textContent = 'Já existe a área "'+dup.nome+'"'+(dup.ativo===false?' (inativa — reative-a em vez de criar outra)':'')+'. Edite o cadastro existente.'; return; }
+
+      // monta a configuração final por turno, preservando horários de refeição já existentes
+      const turnosFinal = {};
+      ts.forEach(t=>{
+        const c = st.turnos[t];
+        const o = {periodicidade:c.periodicidade, quadros:c.quadros, paridade:c.paridade||'todos'};
+        if(c.periodicidade==='semanal') o.dias = c.dias.slice().sort((a,b)=>a-b);
+        const antigo = editando && area.turnos[t];
+        if(antigo && antigo.janelas) o.janelas = antigo.janelas;
+        turnosFinal[t] = o;
+      });
+
+      const btn = $('apSalvar'); btn.disabled = true; btn.textContent = 'Salvando...';
+      try{
+        if(!editando){
+          const ordem = Math.max(0, ...areasAtuais().map(a=>a.ordem||0)) + 1;
+          await salvarAlteracao(areas=>{
+            if(Object.values(areas).some(a=>norm(a.nome)===norm(nome))) return 'duplicada';
+            const id = novoId();
+            areas[id] = {id, nome, ativo:true, ordem, turnos:turnosFinal, criadoEm:Date.now()};
+          }, {acao:'criou', nome, turnos:turnosFinal});
+        } else {
+          const antes = clone(area);
+          await salvarAlteracao(areas=>{
+            const x = areas[area.id]; if(!x) return 'não encontrada';
+            if(Object.values(areas).some(a=>a.id!==area.id && norm(a.nome)===norm(nome))) return 'duplicada';
+            x.nome = nome; x.turnos = turnosFinal; x.atualizadoEm = Date.now();
+          }, {acao:'editou', areaId:area.id, antes, depois:{nome, turnos:turnosFinal}});
+          if(nome !== area.nome) await migrarMarcacoesDeHoje(area.nome, nome);
+        }
+        ov.remove();
+      }catch(e){
+        err.textContent = '❌ '+(e.message||'Não foi possível salvar.');
+        btn.disabled = false; btn.textContent = 'Salvar';
+      }
+    };
+  }
+
+  window.renderAreas = renderAreas;
+
+  /* ------------------------------------------------------------------
+     Navegação (desktop + menu "Mais" do celular) — somente Admin
+     ------------------------------------------------------------------ */
+  function atualizarVisibilidade(){
+    const show = !!isAdmin;
+    const b = document.getElementById('navAreas');
+    if(b){ b.style.display = show ? '' : 'none'; b.classList.toggle('active', section==='areas'); }
+    const mb = document.getElementById('msheetAreas');
+    if(mb) mb.style.display = show ? '' : 'none';
+  }
+  function abrirAreas(){
+    if(!isAdmin){ alert('Acesso restrito ao administrador.'); return; }
+    section = 'areas';
+    renderTopControls();
+    if(typeof window.updateMobileActiveState === 'function') window.updateMobileActiveState('navAreas');
+    renderAreas();
+  }
+  function instalarNavegacao(){
+    if(KIOSK) return;
+    const nav = document.querySelector('.mainnav');
+    if(nav && !document.getElementById('navAreas')){
+      const b = document.createElement('button');
+      b.id = 'navAreas'; b.textContent = '🗂️ Áreas'; b.style.display = 'none';
+      nav.insertBefore(b, document.getElementById('navAdmin'));
+      b.addEventListener('click', abrirAreas);
+    }
+    const sheet = document.querySelector('#mobileMoreMenu .mobile-more-sheet');
+    if(sheet && !document.getElementById('msheetAreas')){
+      const mb = document.createElement('button');
+      mb.id = 'msheetAreas'; mb.style.display = 'none';
+      mb.innerHTML = '<span class="msheet-icon">🗂️</span> Áreas e Periodicidades';
+      sheet.insertBefore(mb, sheet.querySelector('button[data-target="navAdmin"]'));
+      mb.addEventListener('click', ()=>{ document.getElementById('mobileMoreMenu')?.classList.remove('open'); abrirAreas(); });
+    }
+    atualizarVisibilidade();
+  }
+  const _rtc = renderTopControls;
+  renderTopControls = function(){ const r = _rtc.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _sab = showAdminBadge;
+  showAdminBadge = function(){ const r = _sab.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _alo = adminLogout;
+  adminLogout = function(){ if(section==='areas') section='checklist'; const r = _alo.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _rul = renderUserLogin;
+  renderUserLogin = async function(){ if(section==='areas') section='checklist'; const r = await _rul.apply(this, arguments); atualizarVisibilidade(); return r; };
+
+  instalarNavegacao();
+
+})();
+</script>
 </body>
 </html>
