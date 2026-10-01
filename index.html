@@ -249,6 +249,51 @@
   <div style="font-size:13px;color:#8fb0ae;font-family:sans-serif;">Carregando sistema...</div>
 </div>
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+<style id="anx-style">
+/* ── Anexos por limpeza ── */
+.loc-row{position:relative;}
+.loc-row .loc-name{padding-right:92px;}
+.anx-btn{position:absolute;top:8px;right:12px;display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;z-index:2;}
+.anx-btn:hover{border-color:var(--teal);}
+.anx-btn.has{border-color:var(--teal-bright);color:var(--teal-bright);background:rgba(63,214,201,.10);}
+.anx-btn .anx-ic{font-size:13px;line-height:1;}
+.anx-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9990;display:flex;align-items:center;justify-content:center;padding:16px;}
+.anx-modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:100%;max-width:720px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 44px rgba(0,0,0,.6);}
+.anx-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);}
+.anx-title{font-size:15px;font-weight:700;}
+.anx-sub{font-size:12px;color:var(--text-dim);margin-top:3px;word-break:break-word;}
+.anx-x{background:transparent;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;min-width:40px;min-height:40px;}
+.anx-body{overflow-y:auto;padding:14px 18px;-webkit-overflow-scrolling:touch;flex:1;}
+.anx-actions{display:flex;gap:10px;flex-wrap:wrap;}
+.anx-hint{font-size:11.5px;color:var(--text-dim);margin-top:10px;}
+.anx-q{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:7px 10px;margin-top:6px;background:var(--panel-2);border-radius:8px;}
+.anx-q .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.anx-q .st{white-space:nowrap;color:var(--text-dim);}
+.anx-q .st.ok{color:var(--ok);} .anx-q .st.bad{color:var(--bad);white-space:normal;text-align:right;}
+.anx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px;margin-top:14px;}
+.anx-item{position:relative;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;}
+.anx-item.busy{opacity:.55;pointer-events:none;}
+.anx-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#0c1516;}
+.anx-pdf{aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:34px;background:#0c1516;}
+.anx-pdf-lbl{font-size:11px;font-weight:700;color:var(--text-dim);letter-spacing:.5px;}
+.anx-cap{padding:4px 8px 0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.anx-cap.sub{padding:0 8px 7px;font-size:10px;color:var(--text-dim);white-space:normal;line-height:1.35;}
+.anx-del{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:8px;border:none;background:rgba(0,0,0,.62);color:#fff;font-size:14px;cursor:pointer;}
+.anx-empty{grid-column:1/-1;text-align:center;color:var(--text-dim);font-size:13px;padding:26px 8px;}
+.anx-foot{padding:10px 18px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--text-dim);}
+.anx-meter{margin-top:6px;} .anx-meter span{display:block;margin-top:4px;font-size:11px;}
+.anx-meter-bar{height:6px;background:var(--panel-2);border-radius:4px;overflow:hidden;}
+.anx-meter-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-bright));}
+@media (max-width:768px){
+  .anx-btn{top:10px;right:10px;height:38px;padding:0 12px;font-size:13px;}
+  .loc-row .loc-name{padding-right:100px;}
+  .anx-overlay{align-items:flex-end;padding:0;}
+  .anx-modal{max-width:none;border-radius:16px 16px 0 0;max-height:92vh;}
+  .anx-grid{grid-template-columns:repeat(3,1fr);}
+  .anx-actions .btn{flex:1;min-height:48px;}
+}
+</style>
+
 
 <div class="topbar">
   <div>
@@ -1252,6 +1297,283 @@ async function renderChecklist(){
   if(mode==='day') await renderDay(); else await renderWeek();
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   ANEXOS POR LIMPEZA (fotos e PDF) — escopo: DIA + TURNO + LOCAL
+   Padrão de armazenamento idêntico ao módulo de documentos já existente:
+     anexosIdx/{ds}/{locKey}/{id}  → metadados mínimos (carregado com o dia)
+     anexosThumbs/{id}             → miniatura (carregada só ao abrir o modal)
+     anexosFiles/{id}              → arquivo completo em base64 (só ao abrir)
+     anexosStats                   → {bytes,count} (medidor de uso, admin)
+   A tela do Plano NUNCA baixa foto/PDF: só o índice (poucas centenas de bytes).
+   Não altera nenhum dado nem regra do checklist (checklist:{ds} fica intocado).
+   ═══════════════════════════════════════════════════════════════════════ */
+const ANX_MAX_FILES  = 30;                 // por local/turno/dia
+const ANX_MAX_PDF    = 3*1024*1024;        // 3 MB por PDF
+const ANX_IMG_STEPS  = [[1280,0.68],[1024,0.58],[800,0.50]]; // tenta nesta ordem
+const ANX_IMG_TARGET = 380*1024;           // alvo (caracteres do dataURL ≈ bytes gravados)
+const ANX_IMG_HARD   = 700*1024;           // acima disso, recusa
+const ANX_POOL       = 2;                  // arquivos processados em paralelo (poupa memória do celular)
+const ANX_QUOTA      = 1024*1024*1024;     // 1 GB — plano gratuito do Realtime Database
+const ANX_TURN_LABEL = {T1D:'T1 Par',T2D:'T1 Ímpar',T1N:'T2 Par',T2N:'T2 Ímpar'};
+const _anxIdx = {};                        // ds → {ts, data}
+const _anxThumbCache = new Map();          // id → dataURL
+
+const _anxEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function anxLocKey(loc, turnKey){ return (turnKey+'~'+String(loc)).replace(/[.#$\[\]\/\u0000-\u001f]/g,'_'); }
+function anxWho(){ return (currentUser && currentUser.nome) || currentEmployee || 'Operador'; }
+function anxFmtSize(b){ return b>=1048576 ? (b/1048576).toFixed(1).replace('.',',')+' MB' : Math.max(1,Math.round(b/1024))+' KB'; }
+function anxFmtWhen(ts){ const d=new Date(ts); return pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()); }
+
+async function anxLoadIndex(ds, force){
+  const c = _anxIdx[ds];
+  if(!force && c && (Date.now()-c.ts) < 60000) return c.data;
+  try{
+    const s = await withTimeout(fbRoot.child('anexosIdx/'+ds).get(), 15000);
+    const data = s.exists() ? s.val() : {};
+    _anxIdx[ds] = {ts:Date.now(), data};
+    return data;
+  }catch(e){ return (c && c.data) || {}; }
+}
+function anxItems(ds, lk){ const c=_anxIdx[ds]; return (c && c.data && c.data[lk]) || {}; }
+
+/* Botão que aparece em cada linha de local (HTML gerado dentro do renderDay) */
+function anxButtonHtml(locName, turnKey){
+  return `<button type="button" class="anx-btn" data-loc="${_anxEsc(locName)}" data-turn="${turnKey}" data-lk="${_anxEsc(anxLocKey(locName,turnKey))}" title="Anexar fotos ou PDF desta limpeza"><span class="anx-ic">📎</span><span class="anx-lbl">Anexar</span></button>`;
+}
+function anxPaintButtons(ds){
+  const data = (_anxIdx[ds] && _anxIdx[ds].data) || {};
+  document.querySelectorAll('.anx-btn').forEach(b=>{
+    const n = Object.keys(data[b.dataset.lk]||{}).length;
+    b.classList.toggle('has', n>0);
+    b.querySelector('.anx-lbl').textContent = n>0 ? String(n) : 'Anexar';
+    b.title = n>0 ? n+' anexo(s) nesta limpeza — clique para ver' : 'Anexar fotos ou PDF desta limpeza';
+  });
+}
+function anxWireOnce(){
+  const app = document.getElementById('app');
+  if(!app || app._anxWired) return;
+  app._anxWired = true;
+  app.addEventListener('click', e=>{
+    const b = e.target.closest && e.target.closest('.anx-btn');
+    if(!b) return;
+    e.preventDefault(); e.stopPropagation();
+    anxOpenModal(b.dataset.loc, b.dataset.turn);
+  });
+}
+/* Chamado ao fim do renderDay: pinta com o cache na hora (sem piscar) e atualiza em segundo plano */
+function anxAfterRender(ds){
+  anxWireOnce();
+  anxPaintButtons(ds);
+  const c = _anxIdx[ds];
+  if(!c || (Date.now()-c.ts) >= 60000){
+    anxLoadIndex(ds).then(()=>{ if(dateStr(currentDate)===ds) anxPaintButtons(ds); });
+  }
+}
+
+/* ── Preparação dos arquivos (redução no próprio celular) ── */
+function anxReadB64(file){
+  return new Promise((res,rej)=>{
+    const fr = new FileReader();
+    fr.onload = ()=>{ const s=String(fr.result); res(s.slice(s.indexOf(',')+1)); };
+    fr.onerror = ()=>rej(new Error('Não foi possível ler o arquivo.'));
+    fr.readAsDataURL(file);
+  });
+}
+async function anxPrepare(file){
+  const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name||'');
+  const isImg = !isPdf && /^image\//.test(file.type||'');
+  if(!isPdf && !isImg) throw new Error('Formato não aceito — use foto ou PDF.');
+  if(isPdf){
+    if(file.size > ANX_MAX_PDF) throw new Error('PDF com '+anxFmtSize(file.size)+' (limite '+anxFmtSize(ANX_MAX_PDF)+'). Reduza o arquivo e tente de novo.');
+    const b64 = await anxReadB64(file);
+    return {t:'pdf', b64, thumb:null, size:b64.length};
+  }
+  let full = null;
+  for(const [dim,q] of ANX_IMG_STEPS){
+    full = await compressImage(file, dim, q);          // função já existente no sistema
+    if(full.length <= ANX_IMG_TARGET) break;
+  }
+  if(full.length > ANX_IMG_HARD) throw new Error('Imagem muito pesada mesmo após reduzir.');
+  const thumb = await compressImage(file, 256, 0.6);
+  return {t:'img', b64: full.slice(full.indexOf(',')+1), thumb, size: full.length + thumb.length};
+}
+async function anxSaveOne(ds, lk, file){
+  const p = await anxPrepare(file);
+  const id = 'a'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  const meta = {n:(file.name||'arquivo').slice(0,80), t:p.t, s:p.size, by:anxWho(), ts:Date.now()};
+  const up = {};
+  up['anexosIdx/'+ds+'/'+lk+'/'+id] = meta;           // índice + arquivo + miniatura gravados juntos (atômico)
+  up['anexosFiles/'+id] = p.b64;
+  if(p.thumb) up['anexosThumbs/'+id] = p.thumb;
+  try{ await withTimeout(fbRoot.update(up), 60000); }
+  catch(e){ throw new Error('Sem conexão com o servidor — tente novamente.'); }
+  try{ fbRoot.child('anexosStats').transaction(cur=>({bytes:((cur&&cur.bytes)||0)+p.size, count:((cur&&cur.count)||0)+1})); }catch(e){}
+  if(p.thumb) _anxThumbCache.set(id, p.thumb);
+  const c = _anxIdx[ds] || (_anxIdx[ds] = {ts:Date.now(), data:{}});
+  (c.data[lk] = c.data[lk] || {})[id] = meta;
+  return id;
+}
+
+/* ── Modal ── */
+function anxOpenModal(locName, turnKey){
+  const ds = dateStr(currentDate), lk = anxLocKey(locName, turnKey);
+  document.getElementById('anxOverlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'anxOverlay'; ov.className = 'anx-overlay';
+  ov.innerHTML = `
+    <div class="anx-modal" role="dialog" aria-modal="true">
+      <div class="anx-head">
+        <div style="min-width:0;">
+          <div class="anx-title">📎 Anexos da limpeza</div>
+          <div class="anx-sub">${_anxEsc(locName)} · ${ANX_TURN_LABEL[turnKey]||turnKey} · ${fmtBR(currentDate)}</div>
+        </div>
+        <button type="button" class="anx-x" id="anxClose" aria-label="Fechar">✕</button>
+      </div>
+      <div class="anx-body">
+        <div class="anx-actions">
+          <button type="button" class="btn" id="anxPick">📷 Fotos / PDF</button>
+          <button type="button" class="btn secondary" id="anxShoot">📸 Tirar foto</button>
+        </div>
+        <input type="file" id="anxFiles" accept="image/*,application/pdf,.pdf" multiple hidden>
+        <input type="file" id="anxCam" accept="image/*" capture="environment" hidden>
+        <div class="anx-hint">Fotos são reduzidas automaticamente. PDF até ${anxFmtSize(ANX_MAX_PDF)}. Máximo de ${ANX_MAX_FILES} arquivos por local/turno.</div>
+        <div id="anxQueue"></div>
+        <div id="anxGrid" class="anx-grid"></div>
+      </div>
+      <div class="anx-foot" id="anxFoot"></div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const grid = ov.querySelector('#anxGrid'), queue = ov.querySelector('#anxQueue'), foot = ov.querySelector('#anxFoot');
+  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e=>{ if(e.key==='Escape' && !document.getElementById('photoLightbox')?.style.display.includes('flex')) close(); };
+  document.addEventListener('keydown', onKey);
+  ov.querySelector('#anxClose').onclick = close;
+  ov.addEventListener('click', e=>{ if(e.target===ov) close(); });
+
+  async function paint(){
+    const items = Object.entries(anxItems(ds,lk)).map(([id,m])=>({id,...m})).sort((a,b)=>b.ts-a.ts);
+    if(!document.getElementById('anxGrid')) return;
+    grid.innerHTML = items.length ? items.map(m=>`
+      <div class="anx-item" data-id="${m.id}">
+        ${m.t==='pdf'
+          ? `<div class="anx-pdf"><span>📄</span><span class="anx-pdf-lbl">PDF</span></div>`
+          : `<img class="anx-thumb" alt="" data-thumb="${m.id}">`}
+        <div class="anx-cap" title="${_anxEsc(m.n)}">${_anxEsc(m.n)}</div>
+        <div class="anx-cap sub">${anxFmtSize(m.s)} · ${_anxEsc((m.by||'').split(' ')[0])} · ${anxFmtWhen(m.ts)}</div>
+        ${(isAdmin || m.by===anxWho()) ? `<button type="button" class="anx-del" data-del="${m.id}" aria-label="Excluir">🗑</button>` : ''}
+      </div>`).join('') : `<div class="anx-empty">Nenhum anexo ainda. Toque em “Fotos / PDF” para adicionar.</div>`;
+    foot.textContent = items.length ? items.length+' arquivo(s) neste local/turno' : '';
+    anxPaintButtons(ds);
+    // miniaturas: do cache ou buscadas (4 por vez)
+    const pend = [];
+    grid.querySelectorAll('img[data-thumb]').forEach(img=>{
+      const id = img.dataset.thumb;
+      if(_anxThumbCache.has(id)) img.src = _anxThumbCache.get(id); else pend.push(img);
+    });
+    let k = 0;
+    await Promise.all(Array.from({length:Math.min(4,pend.length)}, async ()=>{
+      while(k < pend.length){
+        const img = pend[k++], id = img.dataset.thumb;
+        try{
+          const s = await withTimeout(fbRoot.child('anexosThumbs/'+id).get(), 20000);
+          if(s.exists()){
+            if(_anxThumbCache.size > 400) _anxThumbCache.clear();
+            _anxThumbCache.set(id, s.val()); img.src = s.val();
+          }
+        }catch(e){}
+      }
+    }));
+  }
+
+  async function openItem(id){
+    const m = anxItems(ds,lk)[id]; if(!m) return;
+    const card = grid.querySelector(`[data-id="${id}"]`); card?.classList.add('busy');
+    let w = null;
+    if(m.t==='pdf'){ w = window.open('', '_blank'); if(w) w.document.write('<p style="font-family:Arial;padding:20px;color:#555">Carregando PDF…</p>'); }
+    try{
+      const s = await withTimeout(fbRoot.child('anexosFiles/'+id).get(), 60000);
+      if(!s.exists()) throw new Error('Arquivo não encontrado no servidor.');
+      if(m.t==='pdf'){
+        const bin = atob(s.val()), u = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([u], {type:'application/pdf'}));
+        if(w) w.location.href = url;
+        else { const a=document.createElement('a'); a.href=url; a.download=m.n||'anexo.pdf'; document.body.appendChild(a); a.click(); a.remove(); }
+        setTimeout(()=>URL.revokeObjectURL(url), 120000);
+      } else showPhotoLightbox('data:image/jpeg;base64,'+s.val());
+    }catch(e){ if(w) w.close(); alert('❌ '+(e.message||'Não foi possível abrir o anexo.')); }
+    finally{ card?.classList.remove('busy'); }
+  }
+  async function delItem(id){
+    const m = anxItems(ds,lk)[id]; if(!m) return;
+    // validação real no momento da ação (não depende do botão estar visível)
+    if(!(isAdmin || m.by===anxWho())){ alert('Somente o administrador ou quem anexou pode excluir.'); return; }
+    if(!confirm('Excluir "'+m.n+'"?')) return;
+    const up = {};
+    up['anexosIdx/'+ds+'/'+lk+'/'+id] = null; up['anexosFiles/'+id] = null; up['anexosThumbs/'+id] = null;
+    try{ await withTimeout(fbRoot.update(up), 30000); }catch(e){ alert('❌ Sem conexão — não foi possível excluir.'); return; }
+    try{ fbRoot.child('anexosStats').transaction(cur=>({bytes:Math.max(0,((cur&&cur.bytes)||0)-(m.s||0)), count:Math.max(0,((cur&&cur.count)||0)-1)})); }catch(e){}
+    delete _anxIdx[ds].data[lk][id]; _anxThumbCache.delete(id);
+    paint();
+  }
+  grid.addEventListener('click', e=>{
+    const d = e.target.closest('[data-del]');
+    if(d){ e.stopPropagation(); delItem(d.dataset.del); return; }
+    const it = e.target.closest('.anx-item'); if(it) openItem(it.dataset.id);
+  });
+
+  /* envio em lote com fila e barra de progresso */
+  async function handleFiles(fileList){
+    const files = Array.from(fileList||[]);
+    if(!files.length) return;
+    const room = ANX_MAX_FILES - Object.keys(anxItems(ds,lk)).length;
+    if(room <= 0){ alert('Limite de '+ANX_MAX_FILES+' arquivos neste local/turno já atingido.'); return; }
+    const take = files.slice(0, room);
+    if(files.length > take.length) alert('Só cabem mais '+room+' arquivo(s) — os demais foram ignorados.');
+    const rows = take.map((f,i)=>{
+      const r = document.createElement('div'); r.className='anx-q';
+      r.innerHTML = `<span class="n">${_anxEsc(f.name||'arquivo')}</span><span class="st">⏳ na fila</span>`;
+      queue.appendChild(r); return r;
+    });
+    let next = 0, ok = 0, fail = 0;
+    await Promise.all(Array.from({length:Math.min(ANX_POOL,take.length)}, async ()=>{
+      while(next < take.length){
+        const i = next++, st = rows[i].querySelector('.st');
+        st.textContent = '⏳ enviando…';
+        try{ await anxSaveOne(ds, lk, take[i]); st.textContent='✓ enviado'; st.className='st ok'; ok++; await paint(); }
+        catch(e){ st.textContent='✕ '+(e.message||'falhou'); st.className='st bad'; fail++; }
+      }
+    }));
+    setTimeout(()=>{ rows.forEach(r=>{ if(r.querySelector('.st.ok')) r.remove(); }); }, 2500);
+    anxStatsFoot();
+  }
+  ov.querySelector('#anxPick').onclick  = ()=>ov.querySelector('#anxFiles').click();
+  ov.querySelector('#anxShoot').onclick = ()=>ov.querySelector('#anxCam').click();
+  [ov.querySelector('#anxFiles'), ov.querySelector('#anxCam')].forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const f=inp.files; handleFiles(f).finally(()=>{ inp.value=''; }); });
+  });
+
+  /* medidor de uso — somente administrador */
+  async function anxStatsFoot(){
+    if(!isAdmin) return;
+    try{
+      const s = await withTimeout(fbRoot.child('anexosStats').get(), 8000);
+      const v = s.exists() ? s.val() : {bytes:0,count:0};
+      const pct = Math.min(100, (v.bytes||0)/ANX_QUOTA*100);
+      const el = document.getElementById('anxFoot'); if(!el) return;
+      const base = el.dataset.base || el.textContent; el.dataset.base = base;
+      el.innerHTML = `${_anxEsc(base)}<div class="anx-meter"><div class="anx-meter-bar"><i style="width:${Math.max(1,pct).toFixed(1)}%"></i></div><span>Uso total de anexos: ${anxFmtSize(v.bytes||0)} (${v.count||0} arquivos) — ${pct.toFixed(1).replace('.',',')}% de 1 GB do plano gratuito</span></div>`;
+    }catch(e){}
+  }
+  (async ()=>{
+    grid.innerHTML = '<div class="anx-empty">Carregando…</div>';
+    await anxLoadIndex(ds, true);
+    await paint();
+    anxStatsFoot();
+  })();
+}
+
 async function renderDay(){
   const app = document.getElementById('app');
   // Preserva a posição de rolagem atual (desktop e celular) para restaurar após o re-render.
@@ -1392,7 +1714,7 @@ async function renderDay(){
     dayLocations.forEach(loc=>{
       const n = resolveFreq(loc, t.key, currentDate);
       if(n<=0) return;
-      html += `<div class="loc-row" data-locname="${loc.name.toLowerCase()}"><div class="loc-name">${loc.name}</div><div class="occ-list">`;
+      html += `<div class="loc-row" data-locname="${loc.name.toLowerCase()}"><div class="loc-name">${loc.name}</div>${anxButtonHtml(loc.name,t.key)}<div class="occ-list">`;
       for(let i=0;i<n;i++){
         const k = loc.name+'|'+t.key+'|'+i;
         const entry = getEntry(data,k);
@@ -1456,6 +1778,7 @@ async function renderDay(){
     <div class="legend">Clique numa célula para alternar: pendente → concluído → não realizado.</div>
   `;
   app.innerHTML = html;
+  anxAfterRender(dateStr(currentDate));
   // Restaura a posição de rolagem exatamente onde estava antes do re-render.
   requestAnimationFrame(()=>{ window.scrollTo(0, _scrollY); });
 
@@ -8469,6 +8792,393 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
     };
   }
 
+})();
+</script>
+
+<!-- ===== Efetivo Contratado — Documentação dos colaboradores ===== -->
+<script>
+/* =====================================================================
+   EFETIVO CONTRATADO — DOCUMENTAÇÃO / TREINAMENTOS POR COLABORADOR
+   ---------------------------------------------------------------------
+   Somente Administrador. Arquivos ficam no mesmo Firebase (Realtime
+   Database), sem Firebase Storage:
+     sistema_limpeza/efetivoDocs/tipos/{tipoId}            {nome, ativo, ordem}
+     sistema_limpeza/efetivoDocs/meta/{colab}/{docId}       {tipoId, tipoNome, descricao,
+                                                             arquivoNome, mime, tamanho,
+                                                             criadoEm, criadoPor, ...}
+     sistema_limpeza/efetivoDocs/arquivos/{docId}           conteúdo (base64)
+   {colab} = chave do colaborador derivada do nome. Ao renomear um
+   colaborador pelo ✏️, os documentos acompanham o novo nome.
+   Novos tipos de documento são cadastrados pela tela (⚙️ Tipos de documento).
+   ===================================================================== */
+(function(){
+  'use strict';
+
+  const BASE = () => fbRoot.child('efetivoDocs');
+  const MAX_BYTES = 5*1024*1024;          // limite por arquivo (o banco aceita até ~10 MB por gravação)
+  const OUTROS = '__outros__';
+  const TIPOS_PADRAO = [
+    {id:'ficha_epi',  nome:'Ficha de EPI'},
+    {id:'nr12',       nome:'NR-12'},
+    {id:'trein_maq',  nome:'Treinamento de Máquinas'},
+  ];
+
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+  const chaveColab = nome => norm(nome).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') || 'sem_nome';
+  const novoId = () => 'd'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  const quem = () => (currentUser && currentUser.nome) || 'Admin';
+  const fmtData = ts => { const d = new Date(ts); return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
+  const fmtTam = b => b>=1048576 ? (b/1048576).toFixed(1).replace('.',',')+' MB' : Math.max(1,Math.round(b/1024))+' KB';
+
+  let tipos = {};       // id -> {nome, ativo, ordem}
+  let meta = {};        // colabKey -> {docId: {...}}
+  let abertos = new Set();
+
+  /* ------------------------------------------------------------------
+     Dados
+     ------------------------------------------------------------------ */
+  async function carregar(){
+    const [t, m] = await Promise.all([
+      withTimeout(BASE().child('tipos').get(), 15000),
+      withTimeout(BASE().child('meta').get(), 15000),
+    ]);
+    tipos = t.exists() ? t.val() : {};
+    meta = m.exists() ? m.val() : {};
+    if(!Object.keys(tipos).length){
+      const seed = {}; TIPOS_PADRAO.forEach((x,i)=>seed[x.id] = {nome:x.nome, ativo:true, ordem:i+1});
+      try{
+        const r = await BASE().child('tipos').transaction(cur => cur ? undefined : seed);
+        tipos = (r.snapshot && r.snapshot.val()) || seed;
+      }catch(e){ tipos = seed; }
+    }
+  }
+  const tiposOrdenados = (incluirInativos) => Object.entries(tipos)
+    .filter(([,t])=>incluirInativos || t.ativo!==false)
+    .sort((a,b)=>(a[1].ordem||0)-(b[1].ordem||0)).map(([id,t])=>({id, ...t}));
+  const docsDe = key => Object.entries(meta[key]||{}).map(([id,d])=>({id, ...d})).sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0));
+
+  function lerArquivo(file){
+    return new Promise((res, rej)=>{
+      const fr = new FileReader();
+      fr.onload = ()=>{ const s = String(fr.result); res({b64: s.slice(s.indexOf(',')+1), mime: file.type || 'application/octet-stream'}); };
+      fr.onerror = ()=>rej(new Error('Não foi possível ler o arquivo.'));
+      fr.readAsDataURL(file);
+    });
+  }
+  async function prepararArquivo(file){
+    if(file.type && file.type.startsWith('image/') && file.size > 1024*1024 && typeof compressImageWithLimit==='function'){
+      const dataUrl = await compressImageWithLimit(file, 1500*1024);   // fotos grandes de fichas são comprimidas
+      return {b64: dataUrl.slice(dataUrl.indexOf(',')+1), mime:'image/jpeg', tamanho: Math.round(dataUrl.length*0.75),
+              nome: file.name.replace(/\.[^.]+$/,'')+'.jpg'};
+    }
+    if(file.size > MAX_BYTES) throw new Error('Arquivo maior que '+fmtTam(MAX_BYTES)+'. Reduza o arquivo (ex.: salve o PDF em qualidade menor) e tente de novo.');
+    const {b64, mime} = await lerArquivo(file);
+    return {b64, mime, tamanho:file.size, nome:file.name};
+  }
+
+  async function salvarDocumento(nomeColab, tipoId, descricao, file){
+    if(!isAdmin) throw new Error('Ação restrita ao administrador.');
+    const key = chaveColab(nomeColab), id = novoId();
+    const arq = await prepararArquivo(file);
+    const tipoNome = tipoId===OUTROS ? 'Outros' : (tipos[tipoId] ? tipos[tipoId].nome : tipoId);
+    const m = {colaborador:nomeColab, tipoId, tipoNome, arquivoNome:arq.nome, mime:arq.mime, tamanho:arq.tamanho,
+               criadoEm:Date.now(), criadoPor:quem()};
+    if(tipoId===OUTROS) m.descricao = descricao;
+    // arquivo e cadastro gravados juntos (atômico)
+    await withTimeout(BASE().update({['arquivos/'+id]: arq.b64, ['meta/'+key+'/'+id]: m}), 60000);
+    (meta[key] = meta[key] || {})[id] = m;
+  }
+  async function substituirDocumento(key, id, file){
+    if(!isAdmin) throw new Error('Ação restrita ao administrador.');
+    const arq = await prepararArquivo(file);
+    const atual = meta[key][id];
+    const m = Object.assign({}, atual, {arquivoNome:arq.nome, mime:arq.mime, tamanho:arq.tamanho,
+               substituidoEm:Date.now(), substituidoPor:quem(), arquivoAnterior: atual.arquivoNome});
+    await withTimeout(BASE().update({['arquivos/'+id]: arq.b64, ['meta/'+key+'/'+id]: m}), 60000);
+    meta[key][id] = m;
+  }
+  async function excluirDocumento(key, id){
+    if(!isAdmin) throw new Error('Ação restrita ao administrador.');
+    await withTimeout(BASE().update({['arquivos/'+id]: null, ['meta/'+key+'/'+id]: null}), 30000);
+    delete meta[key][id];
+  }
+  async function abrirDocumento(key, id, baixar){
+    const d = meta[key] && meta[key][id]; if(!d) return;
+    const w = baixar ? null : window.open('', '_blank');
+    if(w) w.document.write('<p style="font-family:Arial;padding:20px;color:#555">Carregando documento…</p>');
+    try{
+      const s = await withTimeout(BASE().child('arquivos/'+id).get(), 60000);
+      if(!s.exists()) throw new Error('Arquivo não encontrado no banco.');
+      const bin = atob(s.val()); const u = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([u], {type: d.mime || 'application/octet-stream'}));
+      if(baixar || !w){ const a = document.createElement('a'); a.href = url; a.download = d.arquivoNome || 'documento'; document.body.appendChild(a); a.click(); a.remove(); }
+      else w.location.href = url;
+      setTimeout(()=>URL.revokeObjectURL(url), 120000);
+    }catch(e){
+      if(w) w.close();
+      alert('❌ '+(e.message||'Não foi possível abrir o documento.'));
+    }
+  }
+  async function moverDocumentos(deKey, paraKey, novoNome){
+    const docs = meta[deKey]; if(!docs || deKey===paraKey) return;
+    const up = {};
+    Object.entries(docs).forEach(([id,d])=>{ up['meta/'+paraKey+'/'+id] = Object.assign({}, d, {colaborador:novoNome}); up['meta/'+deKey+'/'+id] = null; });
+    await withTimeout(BASE().update(up), 30000);
+    meta[paraKey] = Object.assign(meta[paraKey]||{}, ...Object.keys(docs).map(id=>({[id]: up['meta/'+paraKey+'/'+id]})));
+    delete meta[deKey];
+  }
+
+  /* ------------------------------------------------------------------
+     Renomear colaborador pelo ✏️ → documentos acompanham
+     ------------------------------------------------------------------ */
+  let ultimaLista = null;
+  const _load = loadColaboradores;
+  loadColaboradores = async function(){
+    const r = await _load.apply(this, arguments);
+    ultimaLista = (r||[]).map(p=>p.nome||p);
+    return r;
+  };
+  const _save = saveColaboradores;
+  saveColaboradores = async function(list){
+    const antes = ultimaLista;
+    const r = await _save.apply(this, arguments);
+    try{
+      const depois = (list||[]).map(p=>p.nome||p);
+      if(isAdmin && antes && antes.length===depois.length){
+        for(let i=0;i<depois.length;i++){
+          if(antes[i]!==depois[i] && chaveColab(antes[i])!==chaveColab(depois[i]) && meta[chaveColab(antes[i])]){
+            await moverDocumentos(chaveColab(antes[i]), chaveColab(depois[i]), depois[i]);
+          }
+        }
+      }
+      ultimaLista = depois;
+    }catch(e){ console.warn('[Docs] não foi possível mover documentos do colaborador renomeado', e); }
+    return r;
+  };
+
+  /* ------------------------------------------------------------------
+     Interface
+     ------------------------------------------------------------------ */
+  const style = document.createElement('style');
+  style.textContent = `
+    .ed-btn{background:none;border:1px solid var(--line);color:var(--teal-bright);border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer;margin-right:6px;font-family:inherit;white-space:nowrap}
+    .ed-btn.on{background:rgba(63,214,201,.12);border-color:var(--teal)}
+    .ed-box{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:2px 0 6px}
+    .ed-box table{width:100%;border-collapse:collapse;font-size:12.5px}
+    .ed-box th{text-align:left;font-size:11px;color:var(--text-dim);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+    .ed-box td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+    .ed-box tr:last-child td{border-bottom:none}
+    .ed-act{background:none;border:none;cursor:pointer;font-size:12.5px;padding:2px 6px;font-family:inherit;font-weight:600}
+    .ed-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+    .ed-form select,.ed-form input[type=text]{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit}
+    .ed-form input[type=file]{font-size:12.5px;color:var(--text-dim);max-width:260px}
+    .ed-tipo{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:rgba(63,214,201,.12);color:var(--teal-bright)}
+    @media (max-width:767px){ .ed-form > div{flex:1 1 100%} .ed-form select,.ed-form input[type=text]{width:100%;font-size:16px} .ed-hide-m{display:none} }
+  `;
+  document.head.appendChild(style);
+
+  function htmlDocs(nome){
+    const key = chaveColab(nome), docs = docsDe(key);
+    const opts = tiposOrdenados(false).map(t=>`<option value="${esc(t.id)}">${esc(t.nome)}</option>`).join('');
+    return `<div class="ed-box" data-ed-key="${esc(key)}">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;">📎 Documentação — ${esc(nome)}</div>
+      ${docs.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Tipo</th><th>Arquivo</th><th class="ed-hide-m">Data</th><th style="text-align:right;">Ações</th></tr></thead><tbody>
+        ${docs.map(d=>`<tr>
+          <td><span class="ed-tipo">${esc(d.tipoNome)}</span>${d.descricao?`<div style="font-size:11.5px;margin-top:3px;">${esc(d.descricao)}</div>`:''}</td>
+          <td style="word-break:break-all;">${esc(d.arquivoNome)} <span style="color:var(--text-dim);font-size:11px;">(${fmtTam(d.tamanho||0)})</span>
+            ${d.substituidoEm?`<div style="font-size:11px;color:var(--text-dim);">substituído em ${fmtData(d.substituidoEm)}</div>`:''}</td>
+          <td class="ed-hide-m" style="white-space:nowrap;">${fmtData(d.criadoEm)}<div style="font-size:11px;color:var(--text-dim);">${esc(d.criadoPor||'')}</div></td>
+          <td style="text-align:right;white-space:nowrap;">
+            <button class="ed-act" style="color:var(--teal-bright);" data-ed-ver="${esc(d.id)}">Visualizar</button>
+            <button class="ed-act" style="color:var(--teal-bright);" data-ed-baixar="${esc(d.id)}">Baixar</button>
+            <button class="ed-act" style="color:var(--amber);" data-ed-subst="${esc(d.id)}">Substituir</button>
+            <button class="ed-act" style="color:var(--bad);" data-ed-del="${esc(d.id)}">Excluir</button>
+          </td></tr>`).join('')}
+      </tbody></table></div>` : '<div style="font-size:12.5px;color:var(--text-dim);">Nenhum documento cadastrado.</div>'}
+      <button class="btn small secondary" data-ed-novo style="margin-top:10px;">+ Adicionar documento</button>
+      <div class="ed-form" data-ed-form style="display:none;">
+        <div><label class="lbl-base">TIPO DE DOCUMENTO</label>
+          <select data-ed-tipo><option value="">— Selecionar —</option>${opts}<option value="${OUTROS}">Outros</option></select></div>
+        <div data-ed-descrow style="display:none;flex:1;min-width:200px;"><label class="lbl-base">DESCRIÇÃO</label>
+          <input type="text" data-ed-desc maxlength="80" placeholder="Informe o nome do documento/treinamento" style="width:100%;"></div>
+        <div><label class="lbl-base">ARQUIVO</label><input type="file" data-ed-arq accept=".pdf,image/*,.doc,.docx,.xls,.xlsx"></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn small" data-ed-salvar>Salvar documento</button>
+          <button class="btn small secondary" data-ed-cancelar>Cancelar</button>
+        </div>
+        <div data-ed-err style="flex-basis:100%;font-size:12px;color:var(--bad);min-height:14px;"></div>
+      </div>
+      <input type="file" data-ed-substarq accept=".pdf,image/*,.doc,.docx,.xls,.xlsx" style="display:none;">
+    </div>`;
+  }
+
+  function ligarBox(td, nome){
+    const box = td.querySelector('.ed-box'); const key = chaveColab(nome);
+    const q = s => box.querySelector(s);
+    q('[data-ed-novo]').onclick = ()=>{ q('[data-ed-form]').style.display='flex'; q('[data-ed-novo]').style.display='none'; };
+    q('[data-ed-cancelar]').onclick = ()=>{ q('[data-ed-form]').style.display='none'; q('[data-ed-novo]').style.display=''; };
+    q('[data-ed-tipo]').onchange = e=>{ q('[data-ed-descrow]').style.display = e.target.value===OUTROS ? 'block' : 'none'; };
+    q('[data-ed-salvar]').onclick = async ()=>{
+      const err = q('[data-ed-err]'); err.textContent = '';
+      const tipo = q('[data-ed-tipo]').value, desc = q('[data-ed-desc]').value.trim(), file = q('[data-ed-arq]').files[0];
+      if(!tipo){ err.textContent = 'Selecione o tipo de documento.'; return; }
+      if(tipo===OUTROS && !desc){ err.textContent = 'Informe a descrição do documento/treinamento.'; return; }
+      if(!file){ err.textContent = 'Selecione o arquivo.'; return; }
+      const b = q('[data-ed-salvar]'); b.disabled = true; b.textContent = 'Enviando...';
+      try{ await salvarDocumento(nome, tipo, desc, file); redesenhar(td, nome); atualizarContador(nome); }
+      catch(e){ err.textContent = '❌ '+(e.message||'Não foi possível salvar.'); b.disabled = false; b.textContent = 'Salvar documento'; }
+    };
+    box.querySelectorAll('[data-ed-ver]').forEach(b=>b.onclick = ()=>abrirDocumento(key, b.dataset.edVer, false));
+    box.querySelectorAll('[data-ed-baixar]').forEach(b=>b.onclick = ()=>abrirDocumento(key, b.dataset.edBaixar, true));
+    box.querySelectorAll('[data-ed-del]').forEach(b=>b.onclick = async ()=>{
+      const d = meta[key][b.dataset.edDel];
+      if(!confirm('Excluir o documento "'+(d.descricao||d.tipoNome)+' — '+d.arquivoNome+'" de '+nome+'?\nEsta ação não pode ser desfeita.')) return;
+      try{ await excluirDocumento(key, b.dataset.edDel); redesenhar(td, nome); atualizarContador(nome); }
+      catch(e){ alert('❌ '+(e.message||'Não foi possível excluir.')); }
+    });
+    const inpSub = q('[data-ed-substarq]');
+    box.querySelectorAll('[data-ed-subst]').forEach(b=>b.onclick = ()=>{ inpSub.dataset.alvo = b.dataset.edSubst; inpSub.value=''; inpSub.click(); });
+    inpSub.onchange = async ()=>{
+      const file = inpSub.files[0], id = inpSub.dataset.alvo; if(!file || !id) return;
+      const d = meta[key][id];
+      if(!confirm('Substituir "'+d.arquivoNome+'" por "'+file.name+'"?')) return;
+      try{ await substituirDocumento(key, id, file); redesenhar(td, nome); }
+      catch(e){ alert('❌ '+(e.message||'Não foi possível substituir.')); }
+    };
+  }
+  function redesenhar(td, nome){ td.innerHTML = htmlDocs(nome); ligarBox(td, nome); }
+  function atualizarContador(nome){
+    const n = docsDe(chaveColab(nome)).length;
+    document.querySelectorAll('[data-ed-toggle]').forEach(b=>{ if(b.dataset.edNome===nome) b.textContent = '📎 Documentos ('+n+')'; });
+  }
+
+  function alternar(btn, tr, nome){
+    const prox = tr.nextElementSibling;
+    if(prox && prox.classList.contains('ed-row')){ prox.remove(); btn.classList.remove('on'); abertos.delete(nome); return; }
+    const row = document.createElement('tr');
+    row.className = 'ed-row';
+    const td = document.createElement('td'); td.colSpan = tr.children.length || 5; td.style.padding = '0 12px 10px';
+    row.appendChild(td); tr.after(row);
+    redesenhar(td, nome); btn.classList.add('on'); abertos.add(nome);
+  }
+
+  /* ---------- Tipos de documento (configuráveis) ---------- */
+  function abrirTipos(){
+    document.getElementById('edTiposModal')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'edTiposModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const desenhar = ()=>{
+      const lista = tiposOrdenados(true);
+      ov.innerHTML = `<div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:22px;max-width:460px;width:100%;max-height:90vh;overflow-y:auto;">
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">⚙️ Tipos de documento</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px;">Tipos disponíveis em "Adicionar documento". "Outros" está sempre disponível, com descrição livre.</div>
+        ${lista.map(t=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);">
+          <div style="flex:1;font-size:13.5px;${t.ativo===false?'opacity:.5;text-decoration:line-through;':''}">${esc(t.nome)}</div>
+          <button class="btn small secondary" data-tp="${esc(t.id)}" style="${t.ativo===false?'color:var(--ok);border-color:var(--ok);':'color:var(--bad);border-color:var(--bad);'}">${t.ativo===false?'Reativar':'Inativar'}</button></div>`).join('')}
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <input type="text" id="edTpNovo" maxlength="60" placeholder="Novo tipo (ex.: NR-35, ASO)" class="inp-base" style="flex:1;">
+          <button class="btn small" id="edTpAdd">Adicionar</button></div>
+        <div id="edTpErr" style="font-size:12px;color:var(--bad);min-height:16px;margin-top:6px;"></div>
+        <button class="btn secondary" id="edTpFechar" style="width:100%;margin-top:6px;">Fechar</button></div>`;
+      ov.querySelector('#edTpFechar').onclick = ()=>{ ov.remove(); document.querySelectorAll('.ed-row td').forEach(td=>{ const n = td.closest('tr').previousElementSibling?.querySelector('[data-ed-toggle]')?.dataset.edNome; if(n) redesenhar(td, n); }); };
+      ov.querySelector('#edTpAdd').onclick = async ()=>{
+        const nome = ov.querySelector('#edTpNovo').value.replace(/\s+/g,' ').trim(), err = ov.querySelector('#edTpErr');
+        if(!nome){ err.textContent = 'Informe o nome do tipo.'; return; }
+        if(norm(nome)==='outros' || Object.values(tipos).some(t=>norm(t.nome)===norm(nome))){ err.textContent = 'Esse tipo já existe.'; return; }
+        const id = 't'+Date.now().toString(36);
+        const ordem = Math.max(0, ...Object.values(tipos).map(t=>t.ordem||0)) + 1;
+        try{ await withTimeout(BASE().child('tipos/'+id).set({nome, ativo:true, ordem, criadoPor:quem(), criadoEm:Date.now()}), 15000); tipos[id] = {nome, ativo:true, ordem}; desenhar(); }
+        catch(e){ err.textContent = '❌ Não foi possível salvar.'; }
+      };
+      ov.querySelectorAll('[data-tp]').forEach(b=>b.onclick = async ()=>{
+        const id = b.dataset.tp, ativo = tipos[id].ativo===false;
+        try{ await withTimeout(BASE().child('tipos/'+id+'/ativo').set(ativo), 15000); tipos[id].ativo = ativo; desenhar(); }
+        catch(e){ alert('❌ Não foi possível alterar.'); }
+      });
+    };
+    desenhar();
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e=>{ if(e.target===ov) ov.querySelector('#edTpFechar').click(); });
+  }
+
+  /* ---------- Documentos sem colaborador (excluído/renomeado fora do ✏️) ---------- */
+  function htmlOrfaos(nomesAtuais){
+    const keysAtuais = new Set(nomesAtuais.map(chaveColab));
+    const orf = Object.keys(meta).filter(k=>!keysAtuais.has(k) && Object.keys(meta[k]||{}).length);
+    if(!orf.length) return '';
+    const opts = nomesAtuais.slice().sort((a,b)=>a.localeCompare(b,'pt-BR')).map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    return `<div class="ed-box" style="margin-top:14px;border-color:rgba(227,179,65,.4);">
+      <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:4px;">⚠️ Documentos sem colaborador vinculado</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">O colaborador foi removido ou teve o nome alterado. Os documentos foram preservados — vincule-os ao colaborador correto.</div>
+      ${orf.map(k=>{ const docs = docsDe(k); const nome = docs[0]?.colaborador || k;
+        return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--line);">
+          <div style="flex:1;min-width:180px;font-size:13px;"><b>${esc(nome)}</b> — ${docs.length} documento(s)</div>
+          <select data-orf-sel="${esc(k)}" class="inp-base" style="width:auto;min-width:200px;"><option value="">Vincular a…</option>${opts}</select>
+          <button class="btn small" data-orf-ok="${esc(k)}">Vincular</button></div>`; }).join('')}
+    </div>`;
+  }
+
+  /* ---------- Injeção na tela Efetivo Contratado ---------- */
+  async function injetar(){
+    if(!isAdmin) return;
+    const painel = document.getElementById('efPanel-contratado'); if(!painel) return;
+    const linhas = [...painel.querySelectorAll('tr[id^="colab-row-"]')];
+    if(!linhas.length) return;
+    try{ await carregar(); }catch(e){ console.warn('[Docs] não foi possível carregar a documentação', e); return; }
+    if(!document.body.contains(painel)) return;
+
+    const filtros = painel.querySelector('[data-filter-status]')?.parentElement;
+    if(filtros && !document.getElementById('edBarra')){
+      const bar = document.createElement('div');
+      bar.id = 'edBarra';
+      bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:-4px 0 12px;font-size:12.5px;color:var(--text-dim);';
+      bar.innerHTML = '<span>📎 Use “Documentos” em cada colaborador para anexar Ficha de EPI, NR-12, treinamentos e outros.</span><button class="btn small secondary" id="edBtnTipos">⚙️ Tipos de documento</button>';
+      filtros.after(bar);
+      bar.querySelector('#edBtnTipos').onclick = abrirTipos;
+      painel.querySelectorAll('[data-filter-status]').forEach(b=>b.addEventListener('click', ()=>{
+        painel.querySelectorAll('.ed-row').forEach(r=>r.remove());
+        painel.querySelectorAll('[data-ed-toggle]').forEach(x=>x.classList.remove('on'));
+        abertos.clear();
+      }));
+    }
+    const nomes = [];
+    linhas.forEach(tr=>{
+      const nome = (tr.querySelector('td')?.textContent||'').trim(); if(!nome) return;
+      nomes.push(nome);
+      const acoes = tr.querySelector('[data-editcolab]')?.parentElement;
+      if(!acoes || acoes.querySelector('[data-ed-toggle]')) return;
+      const b = document.createElement('button');
+      b.className = 'ed-btn'; b.dataset.edToggle = '1'; b.dataset.edNome = nome;
+      b.textContent = '📎 Documentos ('+docsDe(chaveColab(nome)).length+')';
+      b.onclick = ()=>alternar(b, tr, nome);
+      acoes.insertBefore(b, acoes.firstChild);
+      if(abertos.has(nome)) alternar(b, tr, nome);
+    });
+    const tabela = linhas[0].closest('div[style*="overflow-x"]') || linhas[0].closest('table');
+    document.getElementById('edOrfaos')?.remove();
+    const orfHtml = htmlOrfaos(nomes);
+    if(orfHtml && tabela){
+      const w = document.createElement('div'); w.id = 'edOrfaos'; w.innerHTML = orfHtml; tabela.after(w);
+      w.querySelectorAll('[data-orf-ok]').forEach(b=>b.onclick = async ()=>{
+        const k = b.dataset.orfOk, alvo = w.querySelector(`[data-orf-sel="${CSS.escape(k)}"]`).value;
+        if(!alvo){ alert('Escolha o colaborador.'); return; }
+        try{ await moverDocumentos(k, chaveColab(alvo), alvo); renderEfetivo(); }
+        catch(e){ alert('❌ Não foi possível vincular.'); }
+      });
+    }
+  }
+
+  if(typeof renderEfetivo === 'function'){
+    const _orig = renderEfetivo;
+    renderEfetivo = async function(){
+      const r = await _orig.apply(this, arguments);
+      try{ await injetar(); }catch(e){ console.error('[Docs]', e); }
+      return r;
+    };
+  }
 })();
 </script>
 </body>
