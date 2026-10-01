@@ -7885,5 +7885,591 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
 
 })();
 </script>
+
+<!-- ===== Plano 52 Semanas — Exportação no Excel modelo ===== -->
+<script>
+/* =====================================================================
+   PLANO 52 SEMANAS — EXPORTAÇÃO NO EXCEL MODELO
+   ---------------------------------------------------------------------
+   Abre o arquivo modelo (modelo-plano-52-semanas.xlsx, no repositório,
+   ao lado do index.html), preenche as células de cada atividade/data e
+   gera uma CÓPIA para download. O modelo nunca é alterado.
+
+   Para preservar 100% do layout, o arquivo NÃO é reconstruído por uma
+   biblioteca de planilhas: o .xlsx é aberto como pacote (JSZip) e só os
+   valores das células de data são alterados no XML da aba. Mesclagens,
+   larguras, alturas, cores, fontes, imagens, validações, painéis
+   congelados e impressão ficam exatamente como no modelo.
+
+   Estrutura do modelo (aba " Plan  PT"):
+     linha de meses (JANEIRO…) · linha dos dias da semana · linha dos dias do mês
+     cada atividade ocupa 2 linhas:  1ª = Planejado ("P")  ·  2ª = Status (E/PE/NR/R)
+     uma coluna em branco separa cada semana (domingo → sábado)
+
+   Regra de status (a mesma da tela do Plano 52 Sem.):
+     status gravado no sistema → código gravado
+     sem registro, com limpeza concluída no Plano de Limpeza → E
+     sem registro, data passada, prevista → PE
+     sem registro, data passada, não prevista → NP
+     data futura → status vazio (linha "Planejado" recebe P quando prevista)
+   Células já preenchidas no modelo e sem registro no sistema são mantidas
+   (histórico lançado manualmente).
+   ===================================================================== */
+(function(){
+  'use strict';
+
+  const MODELO_URL = 'modelo-plano-52-semanas.xlsx';
+  const SITE = 'MG02';
+  const JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+  const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const CODIGOS = ['E','PE','NR','R','NP'];
+
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const norm = s => String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+  const p2 = n => String(n).padStart(2,'0');
+  const dsOf = d => d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+  const brOf = d => p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear();
+  const colNum = s => { let n=0; for(const ch of s) n = n*26 + ch.charCodeAt(0)-64; return n; };
+  const colLet = n => { let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; };
+  const splitRef = r => { const m = /^([A-Z]+)(\d+)$/.exec(r); return m ? [colNum(m[1]), +m[2]] : [0,0]; };
+
+  function carregarScript(src){
+    return new Promise((res, rej)=>{
+      if(window.JSZip) return res();
+      const s = document.createElement('script');
+      s.src = src; s.onload = ()=>res(); s.onerror = ()=>rej(new Error('Não foi possível carregar a biblioteca JSZip. Verifique a conexão.'));
+      document.head.appendChild(s);
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     Leitura do modelo
+     ------------------------------------------------------------------ */
+  async function lerTexto(zip, caminho){ const f = zip.file(caminho); return f ? f.async('string') : null; }
+  const parseXml = t => new DOMParser().parseFromString(t, 'application/xml');
+  const serializar = doc => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
+    new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, '');
+
+  async function abrirModelo(buf){
+    const zip = await JSZip.loadAsync(buf);
+    const wbDoc = parseXml(await lerTexto(zip, 'xl/workbook.xml'));
+    const relsDoc = parseXml(await lerTexto(zip, 'xl/_rels/workbook.xml.rels'));
+    const sheets = [...wbDoc.getElementsByTagNameNS(NS, 'sheet')];
+    const aba = sheets.find(s=>{ const n = norm(s.getAttribute('name')); return n.includes('plan') && n.includes('pt'); });
+    if(!aba) throw new Error('A aba "Plan PT" não foi encontrada no modelo.');
+    const rid = aba.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id') || aba.getAttribute('r:id');
+    const rel = [...relsDoc.getElementsByTagName('Relationship')].find(r=>r.getAttribute('Id')===rid);
+    let alvo = rel.getAttribute('Target').replace(/^\//,'');
+    const caminho = alvo.startsWith('xl/') ? alvo : 'xl/'+alvo;
+
+    const sst = [];
+    const sstTxt = await lerTexto(zip, 'xl/sharedStrings.xml');
+    if(sstTxt){
+      const sd = parseXml(sstTxt);
+      [...sd.getElementsByTagNameNS(NS,'si')].forEach(si=>{
+        sst.push([...si.getElementsByTagNameNS(NS,'t')].map(t=>t.textContent).join(''));
+      });
+    }
+    const xmlOriginal = await lerTexto(zip, caminho);
+    const doc = parseXml(xmlOriginal);
+    if(doc.getElementsByTagName('parsererror').length) throw new Error('Não foi possível ler a aba do modelo.');
+    return {zip, caminho, doc, sst, nomeAba: aba.getAttribute('name'), xmlOriginal};
+  }
+
+  function indexarCelulas(M){
+    const linhas = new Map();
+    [...M.doc.getElementsByTagNameNS(NS,'row')].forEach(row=>{
+      const cells = new Map();
+      [...row.getElementsByTagNameNS(NS,'c')].forEach(c=>{ cells.set(splitRef(c.getAttribute('r'))[0], c); });
+      linhas.set(+row.getAttribute('r'), {el:row, cells});
+    });
+    M.linhas = linhas;
+    M.valor = (r, c)=>{
+      const L = linhas.get(r); if(!L) return null;
+      const cel = L.cells.get(c); if(!cel) return null;
+      const t = cel.getAttribute('t');
+      if(t==='inlineStr'){ const is = cel.getElementsByTagNameNS(NS,'t'); return is.length ? [...is].map(x=>x.textContent).join('') : null; }
+      const v = cel.getElementsByTagNameNS(NS,'v')[0]; if(!v) return null;
+      if(t==='s') return M.sst[+v.textContent];
+      if(t==='b') return v.textContent==='1';
+      return v.textContent;
+    };
+  }
+
+  // Descobre cabeçalho, colunas de dados, calendário e as atividades do modelo
+  function mapearModelo(M){
+    let hdr = null;
+    for(const [r] of [...M.linhas].sort((a,b)=>a[0]-b[0])){
+      for(let c=1;c<=20;c++){ if(norm(M.valor(r,c))==='area'){ hdr = {row:r, colArea:c}; break; } }
+      if(hdr) break;
+    }
+    if(!hdr) throw new Error('Cabeçalho "Área" não encontrado no modelo.');
+    const achar = (txt)=>{ for(let c=1;c<=30;c++){ if(norm(M.valor(hdr.row,c)).startsWith(txt)) return c; } return 0; };
+    const cAtv = achar('atividade'), cFreq = achar('frequencia'), cTurno = achar('turno');
+    if(!cAtv || !cFreq) throw new Error('Colunas "Atividade"/"Frequência" não encontradas no modelo.');
+    const rMes = hdr.row-1, rDia = hdr.row+1;
+
+    // colunas de data: têm número do dia na linha de dias
+    const maxCol = Math.max(...[...M.linhas.values()].map(L=>Math.max(0,...L.cells.keys())));
+    const colsDia = [];
+    for(let c=cTurno+1; c<=maxCol; c++){
+      const v = M.valor(rDia, c);
+      if(v!=null && v!=='' && !isNaN(+v)) colsDia.push({col:c, dia:+v});
+    }
+    if(!colsDia.length) throw new Error('Linha de datas não encontrada no modelo.');
+    // 1º de janeiro = primeira coluna com dia 1 a partir do rótulo JANEIRO
+    let cJan = 0;
+    for(let c=1;c<=maxCol;c++){ if(norm(M.valor(rMes,c)).startsWith('jan')){ cJan = c; break; } }
+    const idxJan = colsDia.findIndex(x=>x.col>=cJan && x.dia===1);
+    if(idxJan<0) throw new Error('Não foi possível localizar 1º de janeiro no modelo.');
+    // ano: aquele em que a sequência de datas bate com todos os dias do modelo
+    const anoBase = new Date().getFullYear();
+    let melhor = null;
+    for(const ano of [anoBase-1, anoBase, anoBase+1]){
+      let erros = 0;
+      const cols = colsDia.map((x,i)=>{ const d = new Date(ano,0,1+(i-idxJan)); if(d.getDate()!==x.dia) erros++; return {col:x.col, date:d, dia:x.dia}; });
+      // a letra do dia da semana no cabeçalho (D S T Q Q S S) também precisa bater
+      const LET = ['D','S','T','Q','Q','S','S'];
+      cols.forEach(x=>{ const l = String(M.valor(hdr.row, x.col)||'').trim().toUpperCase(); if(l && l!==LET[x.date.getDay()]) erros++; });
+      if(!melhor || erros<melhor.erros) melhor = {ano, erros, cols};
+    }
+    // semanas: colunas separadoras entre blocos de 7 dias
+    const semanas = []; let atual = [];
+    melhor.cols.forEach((x,i)=>{
+      if(i>0 && x.col !== melhor.cols[i-1].col+1 && atual.length){ semanas.push(atual); atual = []; }
+      atual.push(x);
+    });
+    if(atual.length) semanas.push(atual);
+
+    // atividades: linha "Planejado" (tem frequência) + linha seguinte de status
+    const slots = []; let area = '';
+    const linhasOrd = [...M.linhas.keys()].filter(r=>r>rDia).sort((a,b)=>a-b);
+    for(const r of linhasOrd){
+      const a = M.valor(r, hdr.colArea);
+      if(a!=null && String(a).trim()) area = String(a).trim();
+      const atv = M.valor(r, cAtv), fr = M.valor(r, cFreq);
+      if(atv!=null && String(atv).trim() && fr!=null && String(fr).trim()){
+        slots.push({rowPlan:r, rowStatus:r+1, area, atividade:String(atv).trim(), freq:String(fr).trim()});
+      }
+    }
+    return {hdr, cAtv, cFreq, cTurno, rDia, ano:melhor.ano, errosCalendario:melhor.erros, cols:melhor.cols, semanas, slots};
+  }
+
+  /* ------------------------------------------------------------------
+     Dados reais do sistema (somente leitura)
+     ------------------------------------------------------------------ */
+  async function lerFaixa(prefixo, ini, fim){
+    const out = {};
+    try{
+      const snap = await withTimeout(fbRoot.orderByKey()
+        .startAt(encodeKey(prefixo+ini)).endAt(encodeKey(prefixo+fim)).get(), 90000);
+      if(snap.exists()) snap.forEach(ch=>{ const k = decodeKey(ch.key); out[k.slice(prefixo.length)] = ch.val(); });
+      return out;
+    }catch(e){
+      console.warn('[P52 export] leitura em faixa falhou, lendo dia a dia', e);
+      const dias = []; for(let d=new Date(ini+'T00:00:00'); dsOf(d)<=fim; d.setDate(d.getDate()+1)) dias.push(dsOf(d));
+      for(let i=0;i<dias.length;i+=25){
+        const lote = dias.slice(i,i+25);
+        const res = await Promise.all(lote.map(ds=>window.storage.get(prefixo+ds, true)));
+        res.forEach((r,j)=>{ if(r && r.value!=null) out[lote[j]] = r.value; });
+      }
+      return out;
+    }
+  }
+  const parseJson = v => { if(v==null) return null; if(typeof v==='object') return v; try{ return JSON.parse(v); }catch(e){ return null; } };
+
+  // Mesmo vínculo usado pela sincronização do Plano 52 com o Plano de Limpeza
+  function atvCasaComLocal(a, locName){
+    if(a.fonte==='extra') return p52MatchLocal(a.area, locName);
+    if(P52_ALIAS_MULTI[a.area]) return P52_ALIAS_MULTI[a.area].some(n=>p52MatchLocal(n, locName));
+    const oficial = (a.area in P52_ALIAS) ? P52_ALIAS[a.area] : a.area;
+    return oficial ? p52MatchLocal(oficial, locName) : false;
+  }
+
+  /* ------------------------------------------------------------------
+     Vínculo sistema ↔ modelo
+     ------------------------------------------------------------------ */
+  const areaEquiv = a => { const o = (a in P52_ALIAS) ? P52_ALIAS[a] : a; return norm(o||a); };
+  function vincular(slots, atividades){
+    const chave = (area, atv) => norm(area)+'|'+norm(atv);
+    const chave2 = (area, atv) => areaEquiv(area)+'|'+norm(atv);
+    const ocorr = new Map(), porChave = new Map(), porChave2 = new Map();
+    slots.forEach(s=>{
+      const k = chave(s.area, s.atividade);
+      const n = (ocorr.get(k)||0); ocorr.set(k, n+1); s.ocorrencia = n;
+      porChave.set(k+'#'+n, s);
+      const k2 = chave2(s.area, s.atividade)+'#'+n; if(!porChave2.has(k2)) porChave2.set(k2, s);
+    });
+    const ocorrSis = new Map(), vinc = [], naoVinc = [], usados = new Set();
+    atividades.forEach(a=>{
+      const k = chave(a.area, a.atividade);
+      const n = (ocorrSis.get(k)||0); ocorrSis.set(k, n+1);
+      let s = porChave.get(k+'#'+n) || porChave2.get(chave2(a.area, a.atividade)+'#'+n);
+      if(s && usados.has(s.rowPlan)) s = null;
+      if(s){ usados.add(s.rowPlan); vinc.push({slot:s, atv:a}); }
+      else naoVinc.push({area:a.area, atividade:a.atividade, turno:a.turno, freq:a.freq,
+                         motivo: a.fonte==='extra' ? 'Área criada no sistema, não existe no modelo' : 'Área/atividade não encontrada no modelo'});
+    });
+    const semSistema = slots.filter(s=>!usados.has(s.rowPlan));
+    return {vinc, naoVinc, semSistema};
+  }
+
+  /* ------------------------------------------------------------------
+     Escrita no XML
+     ------------------------------------------------------------------ */
+  function escreverCelula(M, r, c, texto, estiloSeVazia){
+    const L = M.linhas.get(r); if(!L) return false;
+    let cel = L.cells.get(c);
+    if(!cel){
+      cel = M.doc.createElementNS(NS, 'c');
+      cel.setAttribute('r', colLet(c)+r);
+      if(estiloSeVazia!=null) cel.setAttribute('s', estiloSeVazia);
+      const prox = [...L.cells.keys()].filter(k=>k>c).sort((a,b)=>a-b)[0];
+      L.el.insertBefore(cel, prox ? L.cells.get(prox) : null);
+      L.cells.set(c, cel);
+    } else if(estiloSeVazia!=null && M.valor(r,c)==null){
+      cel.setAttribute('s', estiloSeVazia);
+    }
+    while(cel.firstChild) cel.removeChild(cel.firstChild);
+    cel.setAttribute('t', 'inlineStr');
+    const is = M.doc.createElementNS(NS, 'is'), t = M.doc.createElementNS(NS, 't');
+    t.textContent = texto; is.appendChild(t); cel.appendChild(is);
+    return true;
+  }
+
+  // estilo mais usado nas células de status já preenchidas do modelo (fundo verde do modelo)
+  function estiloStatus(M, mapa){
+    const cont = {};
+    mapa.slots.forEach(s=>{
+      mapa.cols.forEach(x=>{
+        const v = M.valor(s.rowStatus, x.col);
+        if(v!=null && v!==''){ const st = M.linhas.get(s.rowStatus)?.cells.get(x.col)?.getAttribute('s'); if(st) cont[st]=(cont[st]||0)+1; }
+      });
+    });
+    return Object.entries(cont).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+  }
+
+  // Amplia a formatação condicional do próprio modelo para todas as semanas
+  // e garante que "NP" não fique laranja (a regra do modelo pinta tudo que contém "P")
+  async function ajustarFormatacao(M, mapa, usouNP){
+    const first = mapa.cols[0].col, last = mapa.cols[mapa.cols.length-1].col;
+    const r1 = mapa.slots[0].rowPlan, r2 = mapa.slots[mapa.slots.length-1].rowStatus;
+    const faixa = colLet(first)+r1+':'+colLet(last)+r2;
+    const cfs = [...M.doc.getElementsByTagNameNS(NS,'conditionalFormatting')];
+    let ampliadas = 0;
+    cfs.forEach(cf=>{
+      const sq = cf.getAttribute('sqref')||'';
+      const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(sq);
+      if(m && colNum(m[1])===first && +m[2]===r1 && sq!==faixa){ cf.setAttribute('sqref', faixa); ampliadas++; }
+    });
+    if(!usouNP || !cfs.length) return {ampliadas, np:false};
+    const stTxt = await lerTexto(M.zip, 'xl/styles.xml');
+    const st = parseXml(stTxt);
+    let dxfs = st.getElementsByTagNameNS(NS,'dxfs')[0];
+    if(!dxfs) return {ampliadas, np:false};
+    const dxf = st.createElementNS(NS,'dxf');
+    const font = st.createElementNS(NS,'font'); const color = st.createElementNS(NS,'color'); color.setAttribute('rgb','FF7F7F7F'); font.appendChild(color);
+    const fill = st.createElementNS(NS,'fill'); const pf = st.createElementNS(NS,'patternFill'); pf.setAttribute('patternType','solid');
+    const fg = st.createElementNS(NS,'fgColor'); fg.setAttribute('rgb','FFFFFFFF'); const bg = st.createElementNS(NS,'bgColor'); bg.setAttribute('rgb','FFFFFFFF');
+    pf.appendChild(fg); pf.appendChild(bg); fill.appendChild(pf); dxf.appendChild(font); dxf.appendChild(fill);
+    const dxfId = dxfs.getElementsByTagNameNS(NS,'dxf').length;
+    dxfs.appendChild(dxf); dxfs.setAttribute('count', String(dxfId+1));
+    M.zip.file('xl/styles.xml', serializar(st), {createFolders:false});
+    [...M.doc.getElementsByTagNameNS(NS,'cfRule')].forEach(r=>r.setAttribute('priority', String((+r.getAttribute('priority')||0)+1)));
+    const cf = M.doc.createElementNS(NS,'conditionalFormatting'); cf.setAttribute('sqref', faixa);
+    const rule = M.doc.createElementNS(NS,'cfRule');
+    [['type','containsText'],['dxfId',String(dxfId)],['priority','1'],['stopIfTrue','1'],['operator','containsText'],['text','NP']].forEach(([k,v])=>rule.setAttribute(k,v));
+    const f = M.doc.createElementNS(NS,'formula'); f.textContent = 'NOT(ISERROR(SEARCH("NP",'+colLet(first)+r1+')))';
+    rule.appendChild(f); cf.appendChild(rule);
+    cfs[0].parentNode.insertBefore(cf, cfs[0]);
+    return {ampliadas, np:true};
+  }
+
+  /* ------------------------------------------------------------------
+     Onde buscar o modelo (nessa ordem):
+       1. arquivo escolhido na janela
+       2. modelo salvo no sistema (Firebase: sistema_limpeza/p52ModeloExcel)
+       3. arquivo publicado ao lado do index.html (modelo-plano-52-semanas.xlsx)
+     ------------------------------------------------------------------ */
+  const REF_MODELO = () => fbRoot.child('p52ModeloExcel');
+  function bufParaB64(buf){
+    const u = new Uint8Array(buf); let s = '';
+    for(let i=0;i<u.length;i+=0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i+0x8000));
+    return btoa(s);
+  }
+  function b64ParaBuf(b64){
+    const bin = atob(b64); const u = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+    return u.buffer;
+  }
+  async function infoModeloSalvo(){
+    try{ const s = await withTimeout(REF_MODELO().child('meta').get(), 10000); return s.exists() ? s.val() : null; }
+    catch(e){ return null; }
+  }
+  async function salvarModelo(file, buf){
+    const quem = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || 'Admin';
+    await withTimeout(REF_MODELO().set({
+      arquivo: bufParaB64(buf),
+      meta: {nome: file.name, tamanho: buf.byteLength, salvoEm: Date.now(), salvoPor: quem}
+    }), 60000);
+  }
+  function erroSemModelo(detalhe){
+    const e = new Error('Modelo do Excel não encontrado'+(detalhe?' ('+detalhe+')':'')+'. Selecione o arquivo "MG02 de Plan 52 SEMANAS" para gerar — e, se quiser, salve-o como modelo oficial do sistema para não precisar escolher de novo.');
+    e.semModelo = true; return e;
+  }
+  async function obterModelo(opts, progresso){
+    if(opts.arquivoModelo) return {buf: await opts.arquivoModelo.arrayBuffer(), origem:'arquivo selecionado ('+opts.arquivoModelo.name+')'};
+    progresso('Buscando o modelo salvo no sistema…');
+    try{
+      const s = await withTimeout(REF_MODELO().child('arquivo').get(), 60000);
+      if(s.exists() && s.val()) return {buf: b64ParaBuf(s.val()), origem:'modelo salvo no sistema'};
+    }catch(e){ console.warn('[P52 export] modelo do Firebase indisponível', e); }
+    progresso('Buscando o modelo publicado com o sistema…');
+    let resp;
+    try{ resp = await fetch(new URL(MODELO_URL, location.href).href+'?v='+Date.now(), {cache:'no-store'}); }
+    catch(e){ throw erroSemModelo(location.protocol==='file:' ? 'o sistema foi aberto como arquivo local' : 'falha ao baixar'); }
+    if(!resp.ok) throw erroSemModelo('arquivo não publicado no servidor');
+    return {buf: await resp.arrayBuffer(), origem:'arquivo publicado com o sistema'};
+  }
+
+  /* ------------------------------------------------------------------
+     Processo completo
+     ------------------------------------------------------------------ */
+  async function gerar(opts, progresso){
+    progresso('Carregando o modelo…');
+    await carregarScript(JSZIP_URL);
+    const {buf, origem} = await obterModelo(opts, progresso);
+    let M;
+    try{ M = await abrirModelo(buf); }
+    catch(e){ const err = new Error('O arquivo de modelo não pôde ser lido: '+(e.message||e)); err.semModelo = !!opts.arquivoModelo; throw err; }
+    let modeloSalvo = false;
+    if(opts.arquivoModelo && opts.salvarModelo && isAdmin){
+      progresso('Salvando o modelo oficial no sistema…');
+      try{ await salvarModelo(opts.arquivoModelo, buf); modeloSalvo = true; }
+      catch(e){ console.warn('[P52 export] não foi possível salvar o modelo', e); }
+    }
+    indexarCelulas(M);
+    const mergesAntes = M.doc.getElementsByTagNameNS(NS,'mergeCell').length;
+    const celulasAntes = M.doc.getElementsByTagNameNS(NS,'c').length;
+    const mapa = mapearModelo(M);
+
+    progresso('Lendo as atividades do sistema…');
+    if(!p52Atividades.length){ p52Atividades = await p52LoadAtividades(); }
+    const todas = p52Atividades.slice();
+    const filtradas = todas.filter(a=>
+      (!opts.area || a.area===opts.area) &&
+      (!opts.turno || String(a.turno||'').includes(opts.turno)) &&
+      (!opts.freq || a.freq===opts.freq));
+    const {vinc, naoVinc, semSistema} = vincular(mapa.slots, filtradas);
+
+    const ini = dsOf(mapa.cols[0].date), fim = dsOf(mapa.cols[mapa.cols.length-1].date);
+    const hoje = p52Today(); const hojeDs = dsOf(hoje);
+    progresso('Lendo os status registrados ('+brOf(mapa.cols[0].date)+' a '+brOf(mapa.cols[mapa.cols.length-1].date)+')…');
+    const statusRaw = await lerFaixa('p52:status:', ini, fim);
+    progresso('Lendo as execuções do Plano de Limpeza…');
+    const checkRaw = hojeDs >= ini ? await lerFaixa('checklist:', ini, hojeDs < fim ? hojeDs : fim) : {};
+
+    const status = {}; Object.entries(statusRaw).forEach(([ds,v])=>{ const o = parseJson(v); if(o) status[ds] = o; });
+    const feitos = {};  // ds -> [locais concluídos]
+    Object.entries(checkRaw).forEach(([ds,v])=>{
+      const o = parseJson(v); if(!o) return;
+      const locs = new Set();
+      Object.entries(o).forEach(([k,e])=>{ const st = e && (typeof e==='string' ? e : e.state); if(st==='done') locs.add(k.split('|')[0]); });
+      if(locs.size) feitos[ds] = [...locs];
+    });
+
+    progresso('Preenchendo as semanas…');
+    const estStatus = estiloStatus(M, mapa);
+    const cont = {P:0, E:0, PE:0, NR:0, R:0, NP:0};
+    let preservadas = 0, substituidas = 0, idsDuplicados = 0;
+    const idsVistos = new Map();
+    vinc.forEach(({atv})=>idsVistos.set(atv.id, (idsVistos.get(atv.id)||0)+1));
+    idsDuplicados = [...idsVistos.values()].filter(n=>n>1).length;
+
+    for(const {slot, atv} of vinc){
+      for(const x of mapa.cols){
+        const ds = dsOf(x.date);
+        const futuro = x.date > hoje;
+        const previsto = p52IsPlanned(atv, x.date);
+        // linha Planejado
+        if(previsto){
+          const vp = M.valor(slot.rowPlan, x.col);
+          if(vp==null || vp===''){ escreverCelula(M, slot.rowPlan, x.col, 'P', null); cont.P++; }
+        }
+        // linha Status
+        const reg = status[ds] && status[ds][atv.id];
+        let cod = null;
+        if(reg && CODIGOS.includes(reg.status)) cod = reg.status;
+        else if(!futuro && (feitos[ds]||[]).some(l=>atvCasaComLocal(atv, l))) cod = 'E';
+        const vs = M.valor(slot.rowStatus, x.col);
+        const temModelo = vs!=null && vs!=='';
+        if(!cod){
+          if(futuro) continue;
+          if(temModelo){ preservadas++; continue; }          // histórico lançado no próprio Excel
+          cod = previsto ? 'PE' : 'NP';
+        } else if(temModelo && String(vs).trim()!==cod) substituidas++;
+        if(temModelo && String(vs).trim()===cod) continue;
+        escreverCelula(M, slot.rowStatus, x.col, cod, estStatus);
+        cont[cod] = (cont[cod]||0)+1;
+      }
+    }
+
+    progresso('Aplicando a formatação do modelo…');
+    const fmt = await ajustarFormatacao(M, mapa, cont.NP>0);
+
+    progresso('Validando…');
+    const xml = serializar(M.doc);
+    const val = {
+      calendarioOk: mapa.errosCalendario===0,
+      merges: {antes: mergesAntes, depois: (xml.match(/<mergeCell /g)||[]).length},
+      celulas: {antes: celulasAntes, depois: (xml.match(/<c /g)||[]).length},
+    };
+    const problemas = [];
+    if(!val.calendarioOk) problemas.push('As datas do modelo não formam um calendário contínuo ('+mapa.errosCalendario+' divergência(s)).');
+    if(val.merges.antes!==val.merges.depois) problemas.push('Quantidade de células mescladas mudou.');
+    if(val.celulas.depois < val.celulas.antes) problemas.push('Células do modelo foram perdidas.');
+    if(problemas.length) throw new Error('Validação falhou: '+problemas.join(' '));
+
+    M.zip.file(M.caminho, xml, {createFolders:false});
+    const blob = await M.zip.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:6},
+      mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+    return {
+      blob, nome: 'Plano_52_Semanas_'+SITE+'_'+mapa.ano+'.xlsx',
+      resumo: {
+        ano: mapa.ano, semanas: mapa.semanas.length, dias: mapa.cols.length,
+        periodo: brOf(mapa.cols[0].date)+' a '+brOf(mapa.cols[mapa.cols.length-1].date),
+        atividadesModelo: mapa.slots.length, atividadesSistema: filtradas.length, vinculadas: vinc.length,
+        cont, preservadas, substituidas, idsDuplicados, fmt, val, origem, modeloSalvo,
+      },
+      naoVinc, semSistema,
+    };
+  }
+
+  /* ------------------------------------------------------------------
+     Interface
+     ------------------------------------------------------------------ */
+  function abrirModal(){
+    document.getElementById('p52ExpModal')?.remove();
+    const atvs = p52Atividades || [];
+    const areas = [...new Set(atvs.map(a=>a.area).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+    const freqs = [...new Set(atvs.map(a=>a.freq).filter(Boolean))].sort();
+    const ov = document.createElement('div');
+    ov.id = 'p52ExpModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const sel = (id, todos, lista, atual) => `<select id="${id}" class="inp-base">${`<option value="">${todos}</option>`}${lista.map(v=>`<option value="${esc(v)}" ${v===atual?'selected':''}>${esc(v)}</option>`).join('')}</select>`;
+    ov.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;">
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">📥 Exportar Excel 52 Semanas</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:16px;">Gera uma cópia do Excel modelo com todas as semanas preenchidas pelos dados reais do sistema.</div>
+        <div id="p52ExpForm">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-bottom:14px;">
+            <input type="checkbox" checked disabled style="width:16px;height:16px;"> <b>Plano completo — todas as 52 semanas</b></label>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Opcional — escolher quais atividades preencher (o calendário continua completo):</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+            <div><label class="lbl-base">ÁREA</label>${sel('p52ExpArea','Todas as áreas',areas,p52Filters.area)}</div>
+            <div><label class="lbl-base">TURNO</label>${sel('p52ExpTurno','Todos os turnos',['1T','2T'],p52Filters.turno)}</div>
+            <div><label class="lbl-base">FREQUÊNCIA</label>${sel('p52ExpFreq','Todas',freqs,p52Filters.freq)}</div>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Modelo: <span id="p52ExpModeloInfo">verificando…</span> ·
+            <a href="#" id="p52ExpOutro" style="color:var(--teal-bright);">selecionar arquivo</a>
+            <input type="file" id="p52ExpArq" accept=".xlsx" style="display:none;"><b id="p52ExpArqNome"></b></div>
+          <label id="p52ExpSalvarRow" style="display:none;gap:8px;align-items:center;font-size:12.5px;margin-bottom:14px;cursor:pointer;">
+            <input type="checkbox" id="p52ExpSalvar" checked style="width:16px;height:16px;"> Salvar este arquivo como modelo oficial do sistema (Admin)</label>
+          <div style="height:8px;"></div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn" id="p52ExpGerar" style="flex:1;">Gerar Excel</button>
+            <button class="btn secondary" id="p52ExpFechar" style="flex:1;">Cancelar</button>
+          </div>
+        </div>
+        <div id="p52ExpOut"></div>
+      </div>`;
+    document.body.appendChild(ov);
+    const $ = id => document.getElementById(id);
+    let arquivo = null;
+    $('p52ExpOutro').onclick = e=>{ e.preventDefault(); $('p52ExpArq').click(); };
+    $('p52ExpArq').onchange = e=>{
+      arquivo = e.target.files[0]||null;
+      $('p52ExpArqNome').textContent = arquivo ? ' — '+arquivo.name : '';
+      $('p52ExpSalvarRow').style.display = (arquivo && isAdmin) ? 'flex' : 'none';
+    };
+    infoModeloSalvo().then(m=>{
+      const el = $('p52ExpModeloInfo'); if(!el) return;
+      el.innerHTML = m ? '<b>'+esc(m.nome)+'</b> (salvo no sistema em '+new Date(m.salvoEm).toLocaleDateString('pt-BR')+(m.salvoPor?' por '+esc(m.salvoPor):'')+')'
+                       : 'arquivo publicado com o sistema ('+esc(MODELO_URL)+')';
+    });
+    $('p52ExpFechar').onclick = ()=>ov.remove();
+    ov.addEventListener('click', e=>{ if(e.target===ov && !ov._ocupado) ov.remove(); });
+
+    $('p52ExpGerar').onclick = async ()=>{
+      const opts = {area:$('p52ExpArea').value, turno:$('p52ExpTurno').value, freq:$('p52ExpFreq').value,
+                    arquivoModelo:arquivo, salvarModelo: !!(arquivo && $('p52ExpSalvar').checked)};
+      $('p52ExpForm').style.display = 'none'; ov._ocupado = true;
+      const out = $('p52ExpOut');
+      const prog = msg => { out.innerHTML = `<div style="text-align:center;padding:24px 0;"><div style="font-size:15px;font-weight:700;">Gerando Plano de 52 Semanas...</div><div style="font-size:12.5px;color:var(--text-dim);margin-top:6px;">${esc(msg)}</div></div>`; };
+      prog('Iniciando…');
+      try{
+        const R = await gerar(opts, prog);
+        const url = URL.createObjectURL(R.blob);
+        const s = R.resumo;
+        const pend = R.naoVinc.length;
+        out.innerHTML = `
+          <div style="font-size:15px;font-weight:700;color:var(--ok);margin-bottom:10px;">✅ Plano de 52 Semanas gerado com sucesso.</div>
+          <div style="font-size:12.5px;line-height:1.7;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;">
+            📅 ${s.semanas} semanas processadas · ${s.dias} dias (${esc(s.periodo)})<br>
+            🧹 ${s.vinculadas} de ${s.atividadesSistema} atividade(s) do sistema vinculada(s) · ${s.atividadesModelo} atividades no modelo<br>
+            ✍️ Preenchidos: P ${s.cont.P} · E ${s.cont.E} · PE ${s.cont.PE} · NR ${s.cont.NR} · R ${s.cont.R} · NP ${s.cont.NP}<br>
+            📌 ${s.preservadas} célula(s) do histórico do modelo mantida(s) · ${s.substituidas} atualizada(s) pelo sistema<br>
+            ✔️ Calendário conferido · mesclagens ${s.val.merges.depois}/${s.val.merges.antes} · layout do modelo preservado<br>
+            📄 Modelo usado: ${esc(s.origem)}${s.modeloSalvo ? ' · <b style="color:var(--ok);">salvo como modelo oficial</b>' : ''}
+            ${s.idsDuplicados ? `<br><span style="color:var(--amber);">⚠ ${s.idsDuplicados} atividade(s) com o mesmo identificador no sistema (mesmo nome repetido na mesma área) receberam o mesmo status.</span>` : ''}
+          </div>
+          ${pend ? `<div style="background:rgba(227,179,65,.1);border:1px solid rgba(227,179,65,.4);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+              ⚠️ <b>Alguns registros não puderam ser vinculados ao modelo.</b> (${pend})
+              <a href="#" id="p52ExpVerPend" style="color:var(--teal-bright);margin-left:6px;">ver pendências</a>
+              <div id="p52ExpPend" style="display:none;margin-top:8px;max-height:220px;overflow:auto;">
+                <table class="report-table"><thead><tr><th>Área</th><th>Atividade</th><th>Freq.</th><th>Motivo</th></tr></thead><tbody>
+                ${R.naoVinc.map(p=>`<tr><td>${esc(p.area)}</td><td>${esc(p.atividade)}</td><td>${esc(p.freq)}</td><td style="font-size:11.5px;">${esc(p.motivo)}</td></tr>`).join('')}
+                </tbody></table></div></div>` : ''}
+          ${R.semSistema.length ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">${R.semSistema.length} atividade(s) do modelo sem correspondente no sistema foram mantidas como estão no modelo.</div>` : ''}
+          <div style="display:flex;gap:10px;">
+            <a class="btn" href="${url}" download="${esc(R.nome)}" style="flex:1;text-align:center;text-decoration:none;">⬇️ Baixar Excel</a>
+            <button class="btn secondary" id="p52ExpFim" style="flex:1;">Fechar</button>
+          </div>`;
+        document.getElementById('p52ExpVerPend')?.addEventListener('click', e=>{ e.preventDefault(); const d = document.getElementById('p52ExpPend'); d.style.display = d.style.display==='none' ? 'block' : 'none'; });
+        document.getElementById('p52ExpFim').onclick = ()=>{ URL.revokeObjectURL(url); ov.remove(); };
+      }catch(e){
+        console.error('[P52 export]', e);
+        out.innerHTML = `<div style="color:var(--bad);font-size:13.5px;margin-bottom:12px;line-height:1.5;">❌ ${esc(e.message||e)}</div>
+          ${e.semModelo ? '<button class="btn" id="p52ExpEscolher" style="width:100%;margin-bottom:8px;">📂 Selecionar o arquivo modelo</button>' : ''}
+          <button class="btn secondary" id="p52ExpVoltar" style="width:100%;">Voltar</button>`;
+        document.getElementById('p52ExpVoltar').onclick = ()=>{ out.innerHTML=''; $('p52ExpForm').style.display=''; };
+        document.getElementById('p52ExpEscolher')?.addEventListener('click', ()=>{ out.innerHTML=''; $('p52ExpForm').style.display=''; $('p52ExpArq').click(); });
+      }finally{ ov._ocupado = false; }
+    };
+  }
+  window.p52AbrirExportacao = abrirModal;
+
+  // Botão na barra do Plano 52 Sem. (sem alterar o restante da tela)
+  if(typeof renderP52Main === 'function'){
+    const _orig = renderP52Main;
+    renderP52Main = function(){
+      const r = _orig.apply(this, arguments);
+      const bar = document.querySelector('#app .p52-toolbar');
+      if(bar && !document.getElementById('p52BtnExport')){
+        const b = document.createElement('button');
+        b.id = 'p52BtnExport'; b.className = 'btn secondary';
+        b.style.cssText = 'padding:7px 12px;font-size:12px;margin-left:auto;color:var(--teal-bright);border-color:var(--teal-bright);';
+        b.textContent = '📥 Exportar Excel 52 Semanas';
+        b.onclick = abrirModal;
+        const upd = [...bar.querySelectorAll('button')].find(x=>/Atualizar Excel/.test(x.textContent));
+        if(upd){ upd.style.marginLeft = '0'; bar.insertBefore(b, upd); } else bar.appendChild(b);
+      }
+      return r;
+    };
+  }
+
+})();
+</script>
 </body>
 </html>
