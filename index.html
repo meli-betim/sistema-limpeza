@@ -249,6 +249,17 @@
   <div style="font-size:13px;color:#8fb0ae;font-family:sans-serif;">Carregando sistema...</div>
 </div>
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+<style id="occ-uniform-style">
+/* Células de horário com largura ÚNICA — não variam mais conforme o tamanho do nome */
+.occ-wrap{ width:46px; flex:0 0 46px; }
+.occ-time{ width:100%; max-width:100% !important; box-sizing:border-box; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.occ-time.occ-who{ letter-spacing:0; }
+.occ-time.occ-nr{ color:var(--bad); font-weight:800; letter-spacing:.3px; }
+@media (max-width:768px){
+  .occ-wrap{ width:52px; flex:0 0 52px; }
+  .occ-time{ font-size:10px !important; }
+}
+</style>
 <style id="anx-style">
 /* ── Anexos por limpeza ── */
 .loc-row{position:relative;}
@@ -286,7 +297,7 @@
 .anx-meter-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-bright));}
 @media (max-width:768px){
   .anx-btn{top:10px;right:10px;height:38px;padding:0 12px;font-size:13px;}
-  .loc-row .loc-name{padding-right:100px;}
+  .loc-row .loc-name{padding-right:100px;min-height:34px;}
   .anx-overlay{align-items:flex-end;padding:0;}
   .anx-modal{max-width:none;border-radius:16px 16px 0 0;max-height:92vh;}
   .anx-grid{grid-template-columns:repeat(3,1fr);}
@@ -1574,6 +1585,14 @@ function anxOpenModal(locName, turnKey){
   })();
 }
 
+/* Nome curto para caber na célula: primeiro nome, no máx. 7 caracteres (ponto quando cortado).
+   Só afeta a EXIBIÇÃO — o nome completo continua gravado e aparece no tooltip e no relatório. */
+function occShortName(full){
+  const first = String(full==null?'':full).trim().split(/\s+/)[0] || '';
+  const MAX = 7;
+  return first.length > MAX ? first.slice(0, MAX-1) + '.' : first;
+}
+
 async function renderDay(){
   const app = document.getElementById('app');
   // Preserva a posição de rolagem atual (desktop e celular) para restaurar após o re-render.
@@ -1755,12 +1774,13 @@ async function renderDay(){
         if(entry.ts){
           // Exibe o horário exato do registro (Concluído/Não realizado) em QUALQUER ambiente,
           // não só banheiros/refeitório — mantendo o mesmo padrão de exibição já usado no sistema.
-          timeHtml = `<div class="occ-time">${fmtTime(entry.ts)}${entry.emp?'<br>'+entry.emp.split(' ')[0]:''}</div>`;
+          timeHtml = `<div class="occ-time">${fmtTime(entry.ts)}</div>${entry.emp?`<div class="occ-time occ-who" title="${_anxEsc(entry.emp)}">${_anxEsc(occShortName(entry.emp))}</div>`:''}`;
         } else if(dlTime && showTime){
           const timeColor = blocked ? 'var(--bad)' : overdue ? 'var(--bad)' : 'var(--text-dim)';
           const mealLabel = mealInfo ? `<div class="occ-time" style="font-weight:600;color:${timeColor};">${mealInfo.label}</div>` : '';
           timeHtml = mealLabel + `<div class="occ-time" style="color:${timeColor};${(blocked||overdue)?'font-weight:600;':''}">${dlTime}</div>`;
         }
+        if(!entry.ts && plExpirada(loc, t.key, i, currentDate, st)) timeHtml += '<div class="occ-time occ-who occ-nr" title="Não realizado — prazo encerrado sem execução">NR</div>';
         html += `<div class="occ-wrap"><div class="occ ${cls}" data-key="${k}" data-blocked="${blocked}" title="${title}">${blocked?'<span class="occ-lock">🔒</span>':overdue?'!':stateSymbol(st)}</div>${timeHtml}</div>`;
       }
       html += `</div></div>`;
@@ -1774,6 +1794,7 @@ async function renderDay(){
       <span><span class="dot done"></span>Concluído</span>
       <span><span class="dot bad"></span>Não realizado</span>
       <span><span class="dot bad" style="animation:overduePulse 1.4s ease-in-out infinite;"></span>Atrasado (automático)</span>
+      <span><b style="color:var(--bad);font-size:10.5px;">NR</b>&nbsp;Prazo encerrado sem execução</span>
     </div>
     <div class="legend">Clique numa célula para alternar: pendente → concluído → não realizado.</div>
   `;
@@ -5410,13 +5431,17 @@ function p52AtvId(area, atv){
 // ── PERSISTÊNCIA ───────────────────────────────
 
 async function p52LoadMeta(){
-  try{ const s = await window.storage.get('p52:meta', true); return s ? JSON.parse(s.value) : null; }catch(e){ return null; }
+  try{ const s = await window.storage.get('p52:meta', true); return s ? JSON.parse(s.value) : P52_META_DERIVADO; }catch(e){ return P52_META_DERIVADO; }
 }
 async function p52SaveMeta(meta){
   try{ await window.storage.set('p52:meta', JSON.stringify(meta), true); }catch(e){}
 }
-async function p52LoadAtividades(){
+async function p52LoadAtividadesLegado(){      // lista antiga do Plano 52 — SOMENTE LEITURA (3ª fonte, transitória)
   try{ const s = await window.storage.get('p52:atividades', true); return s ? JSON.parse(s.value) : []; }catch(e){ return []; }
+}
+async function p52LoadAtividades(){            // lista usada pelas telas = derivada do Plano de Limpeza
+  p52LegadoCache = await p52LoadAtividadesLegado();
+  return plDerivarAtividadesP52(p52LegadoCache);
 }
 async function p52SaveAtividades(list){
   try{ await window.storage.set('p52:atividades', JSON.stringify(list), true); }catch(e){}
@@ -5517,7 +5542,435 @@ function p52ResolveLocalToAreas(locName){
   return [...areas];
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CATÁLOGO DE AMBIENTES DE LIMPEZA        TIPO DE AMBIENTE  →  LISTA DE ATIVIDADES
+   ---------------------------------------------------------------------------
+   Fonte ÚNICA dos planos de limpeza por tipo de ambiente. Quando se conclui
+   uma limpeza de um local cujo nome é reconhecido aqui, o checklist exibido é
+   EXATAMENTE a lista abaixo (e não "Sistema geral do ambiente").
+
+   COMO ADICIONAR UM NOVO AMBIENTE (ex.: Recepção) — só edite este bloco:
+     1) copie um bloco, troque a CHAVE (ex.: RECEPCAO);
+     2) 'rotulo'    = nome mostrado ao usuário;
+     3) 'reconhecer'= palavras que, no INÍCIO do nome do local, identificam o
+                      ambiente (sem acento/maiúscula; "Banheiro Esfera 1" NÃO
+                      casa com "esfera" porque começa com "banheiro");
+     4) 'itens'     = lista de atividades, na ordem em que devem aparecer.
+   Nenhuma outra parte do sistema precisa mudar.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const AMBIENTES_LIMPEZA = {
+  CCM: {
+    rotulo: 'CCM',
+    reconhecer: ['ccm'],
+    itens: [
+      'Realizar varrição',
+      'Limpeza de cadeiras',
+      'Limpeza de divisórias',
+      'Limpeza de mesas',
+      'Limpeza de lixeira e coleta de resíduos',
+    ],
+  },
+  ESFERAS: {
+    rotulo: 'Esferas',
+    reconhecer: ['esferas', 'esfera'],
+    itens: [
+      'Realizar varrição',
+      'Limpeza de cadeiras',
+      'Limpeza de divisórias',
+      'Limpeza de mesas',
+      'Limpeza superficial do bebedouro',
+      'Limpeza de lixeira e coleta de resíduos',
+      'Limpeza dos estofados',
+      'Limpeza da máquina de café',
+      'Reposição dos copos',
+      'Retirada dos copos descartados',
+    ],
+  },
+  // PLANO PADRÃO — substitui o item genérico ("Limpeza geral do ambiente") dos locais cujo
+  // plano é SOMENTE esse item. Locais com itens específicos no Plano 52 NÃO são afetados.
+  PADRAO: {
+    rotulo: 'Padrão',
+    reconhecer: [],                       // não identifica por nome: é aplicado pelo plano genérico
+    usarQuandoPlanoGenerico: true,
+    itens: [
+      'Realizar varrição',
+      'Limpeza de cadeiras',
+      'Limpeza de divisórias',
+      'Limpeza de mesas',
+      'Limpeza de lixeira e coleta de resíduos',
+    ],
+  },
+  // RECEPCAO: { rotulo: 'Recepção', reconhecer: ['recepcao'], itens: ['…', '…'] },
+};
+// Descrições genéricas legadas: continuam existindo nos dados antigos por compatibilidade,
+// mas NUNCA são o plano final de um ambiente que o catálogo consiga identificar.
+const AMB_TEXTOS_GENERICOS = ['limpeza geral do ambiente', 'sistema geral do ambiente'];
+/* true quando a atividade é só o texto genérico legado (ignora maiúscula/acento/pontuação/espaço). */
+function ambEhGenerico(texto){ return AMB_TEXTOS_GENERICOS.includes(ambNormalizar(texto)); }
+/* Tipo do catálogo aplicado quando o plano de um local é SÓ o item genérico. */
+function ambTipoPlanoPadrao(){
+  for(const [tipo,def] of Object.entries(AMBIENTES_LIMPEZA)){ if(def.usarQuandoPlanoGenerico) return tipo; }
+  return null;
+}
+
+/* Normalização: sem acento, minúsculas, sem pontuação, espaços únicos.
+   "  CCM ", "ccm", "CCM - Sistema" → começam todos com a palavra "ccm". */
+function ambNormalizar(s){
+  return String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+}
+function ambSlug(s){ return ambNormalizar(s).replace(/ /g,'_'); }
+
+/* Identifica o tipo de ambiente pelo INÍCIO do nome (limite de palavra).
+   Retorna a chave do catálogo ou null (→ comportamento anterior, nada é inventado). */
+function ambTipoDoLocal(nomeLocal){
+  const n = ambNormalizar(nomeLocal);
+  if(!n) return null;
+  for(const [tipo, def] of Object.entries(AMBIENTES_LIMPEZA)){
+    for(const r of (def.reconhecer||[])){
+      const k = ambNormalizar(r);
+      if(k && (n === k || n.startsWith(k+' '))) return tipo;
+    }
+  }
+  return null;
+}
+/* Itens do tipo, com id estável (slug do texto) e SEM duplicatas. */
+function ambItensDo(tipo){
+  const def = AMBIENTES_LIMPEZA[tipo]; if(!def) return [];
+  const vistos = new Set(), out = [];
+  (def.itens||[]).forEach(t=>{
+    const texto = String(t==null?'':t).trim(), id = ambSlug(texto);
+    if(!texto || vistos.has(id)) return;
+    vistos.add(id); out.push({id, texto});
+  });
+  return out;
+}
+/* Chave de estado: tipo + LOCAL + TURNO → dois locais/turnos nunca compartilham estado. */
+function ambChave(tipo, locName, turnKey){ return tipo+'~'+ambSlug(locName)+'~'+turnKey; }
+const ambEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* Validação do catálogo ao carregar: avisa (console) sobre erros de cadastro. */
+(function ambValidarCatalogo(){
+  const dono = {};
+  Object.entries(AMBIENTES_LIMPEZA).forEach(([tipo,def])=>{
+    if(!ambItensDo(tipo).length) console.warn('[Ambientes] "'+tipo+'" está sem itens.');
+    if((def.itens||[]).length !== ambItensDo(tipo).length) console.warn('[Ambientes] "'+tipo+'" tem itens duplicados/vazios (ignorados).');
+    (def.reconhecer||[]).forEach(r=>{ const k=ambNormalizar(r);
+      if(dono[k] && dono[k]!==tipo) console.warn('[Ambientes] palavra "'+r+'" reconhece "'+dono[k]+'" e "'+tipo+'" — o 1º do catálogo vence.');
+      dono[k] = dono[k] || tipo; });
+  });
+})();
+
+/* Estado salvo (nó próprio por dia+local+turno — gravação granular, sem sobrescrever outros locais). */
+async function ambLerEstado(ds, chave){
+  try{ const s = await withTimeout(fbRoot.child('ambChk/'+ds+'/'+chave).get(), 6000); return s.exists() ? s.val() : null; }
+  catch(e){ return null; }   // falha de leitura nunca bloqueia: abre com tudo marcado, como sempre
+}
+
+/* Checklist do ambiente — mesmo comportamento do checklist atual:
+   todos marcados por padrão; desmarque só o que NÃO foi feito; Confirmar grava; Cancelar não altera nada.
+   Retorna Promise<true|false> (true = pode gravar o quadradinho). */
+async function ambAbrirChecklist(tipo, locName, turnKey, date, empName){
+  const def = AMBIENTES_LIMPEZA[tipo], itens = ambItensDo(tipo);
+  if(!def || !itens.length) return true;                       // catálogo vazio → segue o fluxo normal
+  const ds = dateStr(date), chave = ambChave(tipo, locName, turnKey);
+  const salvo = await ambLerEstado(ds, chave);                  // restaura o que já foi marcado
+  const turnLabel = ({T1D:'T1 Par (Diurno)',T2D:'T1 Ímpar (Diurno)',T1N:'T2 Par (Noturno)',T2N:'T2 Ímpar (Noturno)'})[turnKey] || turnKey;
+
+  return new Promise(resolve=>{
+    document.getElementById('ambChecklistOverlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'ambChecklistOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const itemsHtml = itens.map(it=>{
+      const marcado = !(salvo && salvo.itens && salvo.itens[it.id] && salvo.itens[it.id].s==='NR');
+      return `<label style="display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line);cursor:pointer;">
+        <input type="checkbox" data-amb-id="${ambEsc(it.id)}" ${marcado?'checked':''} style="width:20px;height:20px;accent-color:var(--teal-bright);cursor:pointer;flex-shrink:0;">
+        <span style="font-size:14px;color:var(--text);">${ambEsc(it.texto)}</span></label>`;
+    }).join('');
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:24px;max-width:440px;width:100%;max-height:85vh;display:flex;flex-direction:column;">
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">📋 Checklist — ${ambEsc(locName)}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">${fmtBR(date)} · ${turnLabel} · ${ambEsc(empName)}</div>
+        <div style="display:inline-block;align-self:flex-start;font-size:11.5px;font-weight:700;color:var(--teal-bright);background:rgba(63,214,201,.12);border-radius:20px;padding:3px 10px;margin-bottom:10px;">Plano de limpeza: ${ambEsc(def.rotulo)} · ${itens.length} itens</div>
+        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:14px;background:rgba(63,214,201,.08);border-radius:6px;padding:8px 10px;">
+          ${salvo ? 'Estado anterior restaurado. ' : 'Todas as atividades vêm marcadas por padrão. '}Desmarque apenas as que <strong>não</strong> foram realizadas nesta execução.
+        </div>
+        <div style="overflow-y:auto;flex:1;margin-bottom:12px;">${itemsHtml}</div>
+        <div id="ambChkErro" style="font-size:12px;color:var(--bad);min-height:16px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button id="ambChkConfirm" class="btn" style="flex:1;">Confirmar conclusão</button>
+          <button id="ambChkCancel" class="btn secondary" style="flex:1;">Cancelar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#ambChkCancel').addEventListener('click', ()=>{ overlay.remove(); resolve(false); });
+    overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); resolve(false); } });
+    overlay.querySelector('#ambChkConfirm').addEventListener('click', async ()=>{
+      const btn = overlay.querySelector('#ambChkConfirm'); btn.disabled = true; btn.textContent = 'Salvando…';
+      const reg = {tipo, local:locName, turno:turnKey, resp:empName, ts:new Date().toISOString(), itens:{}};
+      overlay.querySelectorAll('input[data-amb-id]').forEach(cb=>{
+        const it = itens.find(x=>x.id===cb.getAttribute('data-amb-id'));
+        reg.itens[cb.getAttribute('data-amb-id')] = {s: cb.checked ? 'E' : 'NR', t: it ? it.texto : ''};
+      });
+      try{ await withTimeout(fbRoot.child('ambChk/'+ds+'/'+chave).set(reg), 15000); }
+      catch(e){
+        overlay.querySelector('#ambChkErro').textContent = 'Não foi possível salvar o checklist (sem conexão?). Tente novamente.';
+        btn.disabled = false; btn.textContent = 'Confirmar conclusão'; return;     // mantém aberto: nada se perde
+      }
+      try{                                   // espelha no Plano 52: E/NR por atividade, nos mesmos ids da grade
+        const st = await p52LoadStatusDay(ds);
+        itens.forEach(it=>{ const r = reg.itens[it.id]; if(r) st[p52AtvId(locName, it.texto)] = {status:r.s, resp:empName, ts:reg.ts, manual:false}; });
+        await p52SaveStatusDay(ds, st); p52StatusCache[ds] = st;
+      }catch(e){}
+      overlay.remove(); resolve(true);
+    });
+  });
+}
+
+/* Diagnóstico (rode no console: ambDiagnostico()). Mostra o que o catálogo cobre e onde
+   ainda existe plano genérico legado — base para eliminar o "Sistema geral do ambiente" aos poucos. */
+function ambDiagnostico(){
+  const cobertos = [], semCatalogo = [];
+  (typeof LOCATIONS!=='undefined' ? LOCATIONS : []).forEach(l=>{ const t=ambTipoDoLocal(l.name); if(t) cobertos.push({local:l.name,tipo:t}); else semCatalogo.push(l.name); });
+  const porArea = {};
+  (typeof p52Atividades!=='undefined' ? p52Atividades : []).forEach(a=>{ (porArea[a.area]=porArea[a.area]||[]).push(a.atividade); });
+  const areas = [], variantes = [];
+  Object.entries(porArea).forEach(([area,lista])=>{
+    lista.forEach(x=>{ if(!ambEhGenerico(x) && /geral/i.test(String(x))) variantes.push({area, atividade:x}); });
+    const g = lista.filter(ambEhGenerico); if(!g.length) return;
+    const tipo = ambTipoDoLocal(area), soGen = g.length===lista.length;
+    areas.push({area, tipoNoCatalogo:tipo, soGenerico:soGen, itens:lista.length,
+                resultado: tipo ? 'catálogo por nome ('+tipo+')' : (soGen ? 'recebe o plano PADRÃO' : 'misto — permanece como está')});
+  });
+  const r = {catalogo:Object.fromEntries(Object.keys(AMBIENTES_LIMPEZA).map(t=>[t, ambItensDo(t).map(i=>i.texto)])),
+             locaisCobertosPeloCatalogo:cobertos, qtdLocaisSemCatalogo:semCatalogo.length,
+             areasP52ComPlanoGenerico:areas, variantesSuspeitas:variantes};
+  console.table(areas); console.log(r); return r;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PLANO DE LIMPEZA  →  PLANO DE 52 SEMANAS        (fonte única de áreas e atividades)
+   ---------------------------------------------------------------------------
+     ÁREAS        getLocationsForDate()  — cadastro "Áreas e Periodicidades" do Plano de Limpeza
+     ATIVIDADES   plAtividadesDoLocal()  — ÚNICO resolvedor (checklist e Plano 52 usam o mesmo)
+     PLANO 52     p52Atividades          — SEMPRE derivada daqui; nunca mais uma lista própria
+
+   Ordem de precedência das atividades de um local:
+     1) catálogo por nome (AMBIENTES_LIMPEZA: CCM, ESFERAS…)
+     2) atividades específicas já registradas no Plano 52 antigo que pertencem ao local
+        ("legado": fonte de ENTRADA transitória, SOMENTE LEITURA — desligue com PLANO52_USAR_LEGADO=false
+         depois de promovê-las ao catálogo; veja plExportarLegadoComoCatalogo())
+     3) plano PADRÃO quando o local só tem o item genérico ("Limpeza geral do ambiente")
+   Item genérico NUNCA aparece junto de itens específicos.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PLANO52_USAR_LEGADO = true;
+const PLANO52_MOSTRAR_AREAS_SEM_ATIVIDADE = true;
+const P52_META_DERIVADO = {derivado:true, fonte:'plano-de-limpeza'};
+let p52LegadoCache = [];          // lista antiga do Plano 52 (somente leitura)
+let p52AreasSemAtividade = [];    // áreas do Plano de Limpeza que ainda não têm atividades
+let p52LegadoOrfas = [];          // atividades antigas que não pertencem a nenhuma área do Plano de Limpeza
+const _plAtivoCache = new Map();
+
+/* mesma regra de vínculo do checklist (p52ResolveLocalToAreas), aplicada sobre a lista LEGADA */
+function plLegadoAreasDoLocal(locName, legado){
+  const areas = new Set();
+  for(const atv of legado){
+    if(atv.fonte === 'extra'){ if(p52MatchLocal(atv.area, locName)) areas.add(atv.area); continue; }
+    if(P52_ALIAS_MULTI[atv.area]){ if(P52_ALIAS_MULTI[atv.area].some(n=>p52MatchLocal(n, locName))) areas.add(atv.area); continue; }
+    const oficial = P52_ALIAS[atv.area] || atv.area;
+    if(p52MatchLocal(oficial, locName)) areas.add(atv.area);
+  }
+  return [...areas];
+}
+function plLegadoDoLocal(locName, legado){
+  const itens = [];
+  plLegadoAreasDoLocal(locName, legado).forEach(a=>{
+    legado.filter(x=>x.area===a).forEach(x=>itens.push({texto:x.atividade, origem:'legado:'+a, leg:x}));
+  });
+  return itens;
+}
+/* ÚNICO resolvedor de atividades de um local (ordem preservada, sem duplicatas) */
+function plAtividadesDoLocal(locName, legado){
+  const tipo = ambTipoDoLocal(locName);
+  let itens;
+  if(tipo){
+    itens = ambItensDo(tipo).map(i=>({texto:i.texto, origem:'catalogo:'+tipo}));
+  }else{
+    itens = PLANO52_USAR_LEGADO ? plLegadoDoLocal(locName, legado||[]) : [];
+    const especificos = itens.filter(x=>!ambEhGenerico(x.texto));
+    if(itens.length && !especificos.length){                       // só genérico → plano padrão
+      const t = ambTipoPlanoPadrao();
+      itens = t ? ambItensDo(t).map(i=>({texto:i.texto, origem:'catalogo:'+t})) : itens;
+    }else if(especificos.length !== itens.length){                 // genérico + específicos → só os específicos
+      itens = especificos;
+    }
+  }
+  const vistos = new Set();
+  return itens.filter(x=>{ const k = ambSlug(x.texto); if(!k || vistos.has(k)) return false; vistos.add(k); return true; });
+}
+/* o local tem ocorrência neste dia? (usa a periodicidade REAL do Plano de Limpeza) */
+function plLocalAtivoNoDia(locName, date){
+  const ds = dateStr(date), k = ds+'|'+locName;
+  if(_plAtivoCache.has(k)) return _plAtivoCache.get(k);
+  const loc = getLocationsForDate(date).find(l=>l.name===locName);
+  const v = !!loc && activeTurns(date).some(t=>resolveFreq(loc, t.key, date) > 0);
+  _plAtivoCache.set(k, v); return v;
+}
+function plPerfilDoLocal(loc, base){
+  let diurno=false, noturno=false, dias=0; const N = 14;
+  for(let i=0;i<N;i++){
+    const d = new Date(base); d.setDate(base.getDate()+i); let any=false;
+    activeTurns(d).forEach(t=>{ if(resolveFreq(loc, t.key, d) > 0){ any=true; if(t.key==='T1D'||t.key==='T2D') diurno=true; else noturno=true; } });
+    if(any) dias++;
+  }
+  return {turno: diurno&&noturno ? '1T/2T' : diurno ? '1T' : noturno ? '2T' : '1T/2T', freq: dias>=N-1 ? 'D' : (dias<=3 ? 'S' : 'D')};
+}
+/* Monta a lista no MESMO formato que as telas do Plano 52 já usam (id, area, atividade, freq, turno, planning) */
+function plDerivarAtividadesP52(legado){
+  _plAtivoCache.clear();
+  legado = legado || [];
+  const hoje = (typeof p52Today === 'function') ? p52Today() : new Date();
+  const locais = getLocationsForDate(hoje);
+  const out = [], vazias = [], usadas = new Set(), usoArea = {};
+  locais.forEach(l=>plLegadoAreasDoLocal(l.name, legado).forEach(a=>{ (usoArea[a] = usoArea[a] || new Set()).add(l.name); }));
+  locais.forEach(loc=>{
+    const itens = plAtividadesDoLocal(loc.name, legado);
+    if(!itens.length){ vazias.push(loc.name); return; }
+    const perfil = plPerfilDoLocal(loc, hoje);
+    itens.forEach(it=>{
+      if(it.leg){                       // vem do legado: preserva id (histórico), freq, turno e planning
+        usadas.add(it.leg);
+        const compartilhada = usoArea[it.leg.area] && usoArea[it.leg.area].size > 1;
+        out.push({id: compartilhada ? p52AtvId(loc.name+'::'+it.leg.area, it.texto) : it.leg.id,
+                  area: loc.name, atividade: it.texto, freq: it.leg.freq, turno: it.leg.turno, planning: it.leg.planning || {},
+                  fonte:'plano', plLocal: loc.name, plOrigem: it.origem});
+      }else{                            // vem do catálogo: periodicidade real da área
+        out.push({id: p52AtvId(loc.name, it.texto), area: loc.name, atividade: it.texto, freq: perfil.freq, turno: perfil.turno, planning: {},
+                  fonte:'plano', plLocal: loc.name, plOrigem: it.origem, plDia: d=>plLocalAtivoNoDia(loc.name, d)});
+      }
+    });
+  });
+  p52AreasSemAtividade = vazias;
+  p52LegadoOrfas = legado.filter(x=>!usadas.has(x));
+  return out;
+}
+/* linha-resumo com as áreas do Plano de Limpeza que ainda não têm atividades (layout da grade intacto) */
+function p52LinhaAreasSemAtividade(colspan){
+  if(!PLANO52_MOSTRAR_AREAS_SEM_ATIVIDADE) return '';
+  if(typeof p52Filters !== 'undefined' && (p52Filters.turno || p52Filters.freq || p52Filters.status)) return '';
+  let v = p52AreasSemAtividade;
+  if(typeof p52Filters !== 'undefined' && p52Filters.area) v = v.filter(a=>a===p52Filters.area);
+  if(!v.length) return '';
+  return `<tr><td colspan="${colspan}" style="padding:12px 14px;font-size:11.5px;color:var(--text-dim);border-top:1px solid var(--line);line-height:1.6;">
+    <strong style="color:var(--teal-bright);">Áreas do Plano de Limpeza ainda sem atividades cadastradas (${v.length}):</strong> ${v.map(ambEsc).join(' · ')}</td></tr>`;
+}
+/* Auditoria: confere as regras (rode no console: plAuditoriaPlano52()) */
+function plAuditoriaPlano52(){
+  const hoje = (typeof p52Today === 'function') ? p52Today() : new Date();
+  const locais = getLocationsForDate(hoje).map(l=>l.name);
+  const porArea = new Map();
+  p52Atividades.forEach(a=>{ if(!porArea.has(a.area)) porArea.set(a.area, []); porArea.get(a.area).push(a); });
+  const r = {areasPlanoLimpeza: locais.length, areasComAtividades: 0, areasSemAtividades: p52AreasSemAtividade.length,
+             areasAusentes: [], areasForaDoPlanoLimpeza: [], diferencas: [], duplicadas: [], genericoComEspecifico: [], colisoes: [], orfas: p52LegadoOrfas.map(x=>x.area+' → '+x.atividade)};
+  locais.forEach(n=>{
+    const esperado = plAtividadesDoLocal(n, p52LegadoCache).map(x=>x.texto);
+    const noP52 = (porArea.get(n) || []).map(a=>a.atividade);
+    if(!esperado.length){ if(!p52AreasSemAtividade.includes(n) || noP52.length) r.areasAusentes.push(n); return; }
+    r.areasComAtividades++;
+    if(!porArea.has(n)) r.areasAusentes.push(n);
+    if(JSON.stringify(esperado) !== JSON.stringify(noP52)) r.diferencas.push({area:n, esperado, noP52});
+    const slugs = noP52.map(ambSlug); if(new Set(slugs).size !== slugs.length) r.duplicadas.push(n);
+    if(noP52.some(ambEhGenerico) && noP52.some(x=>!ambEhGenerico(x))) r.genericoComEspecifico.push(n);
+    const alvo = p52ResolveLocalToAreas(n); if(alvo.length !== 1 || alvo[0] !== n) r.colisoes.push({local:n, casaCom:alvo});
+  });
+  [...porArea.keys()].forEach(a=>{ if(!locais.includes(a)) r.areasForaDoPlanoLimpeza.push(a); });
+  r.ok = !r.areasAusentes.length && !r.diferencas.length && !r.duplicadas.length && !r.genericoComEspecifico.length && !r.areasForaDoPlanoLimpeza.length;
+  console.log('[Auditoria Plano 52]', r); return r;
+}
+/* Gera o texto para PROMOVER as atividades antigas ao catálogo (e depois desligar o legado). */
+function plExportarLegadoComoCatalogo(){
+  const por = {};
+  p52Atividades.filter(a=>/^legado:/.test(a.plOrigem||'')).forEach(a=>{ (por[a.area] = por[a.area] || []).push(a.atividade); });
+  const txt = Object.entries(por).map(([area,l])=>
+    "  "+ambSlug(area).toUpperCase()+": { rotulo: "+JSON.stringify(area)+", reconhecer: ["+JSON.stringify(ambNormalizar(area))+"], itens: [\n"+l.map(x=>"    "+JSON.stringify(x)+",").join('\n')+"\n  ] },").join('\n');
+  console.log('// Cole dentro de AMBIENTES_LIMPEZA e depois defina PLANO52_USAR_LEGADO = false\n'+txt); return txt;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NR — "NÃO REALIZADO" = PRAZO ENCERRADO SEM EXECUÇÃO
+   Mesmo critério do cadeado do Plano de Limpeza (agora > prazo + tolerância), porém
+   SÓ o lado "tarde demais": o cadeado de "cedo demais" (banheiros, >2h antes) NÃO é NR.
+   Uma única regra alimenta: Plano de Limpeza (rótulo NR), Plano 52 (semanal/mensal) e Excel.
+   Não altera isBlockedLate/isOverdue/occDeadline (funções protegidas).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PL_INICIO_REGISTRO_FIXO = null;   // opcional: 'AAAA-MM-DD' força a data em que o registro começou a valer
+const _plNrCache = new Map();
+let _plInicioReg = null;
+function plLimparCacheNR(){ _plNrCache.clear(); }
+/* prazo da ocorrência já encerrou e ela continua pendente? (independe do perfil: admin também) */
+function plExpirada(loc, turnKey, idx, date, state){
+  if(state !== 'pending') return false;
+  const dl = occDeadline(loc, turnKey, idx, date); if(!dl) return false;
+  const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  return nowMs > dl.getTime() + blockTolerance(loc, turnKey, idx, date);
+}
+/* Situação do LOCAL no dia segundo o Plano de Limpeza: 'E' (alguma limpeza feita) · 'NR' (nada feito e
+   tudo encerrado/não realizado) · 'PE' (ainda há ocorrência aberta) · null (sem base para decidir) */
+function plStatusLocalDia(locName, date, dataDia){
+  const k = dateStr(date)+'|'+locName; if(_plNrCache.has(k)) return _plNrCache.get(k);
+  let r = null;
+  const loc = getLocationsForDate(date).find(l=>l.name===locName);
+  if(loc && dataDia){
+    const ocs = [];
+    activeTurns(date).forEach(t=>{ const n = resolveFreq(loc, t.key, date);
+      for(let i=0;i<n;i++){ const e = getEntry(dataDia, loc.name+'|'+t.key+'|'+i); ocs.push({t:t.key, i, st:e.state || 'pending'}); } });
+    if(ocs.length){
+      if(ocs.some(o=>o.st==='done')) r = 'E';
+      else if(ocs.every(o=>o.st==='bad' || plExpirada(loc, o.t, o.i, date, o.st))) r = 'NR';
+      else r = 'PE';
+    }
+  }
+  _plNrCache.set(k, r); return r;
+}
+/* Status de uma atividade num dia SEM registro gravado no Plano 52 (dia já previsto e não futuro).
+   Antes do início do registro do sistema mantém PE (não existia Plano de Limpeza para cobrar). */
+function plStatusPadrao(atv, date, dataDia, inicio){
+  if(!inicio || dateStr(date) < inicio || !dataDia || !atv.plLocal) return 'PE';
+  return plStatusLocalDia(atv.plLocal, date, dataDia) || 'PE';
+}
+async function plLerChecklists(days){
+  const out = {};
+  await Promise.all(days.map(async d=>{ const ds = dateStr(d);
+    try{ const r = await window.storage.get('checklist:'+ds, false); out[ds] = r ? JSON.parse(r.value) : {}; }
+    catch(e){ out[ds] = {}; } }));
+  return out;
+}
+/* primeiro dia com dados no Plano de Limpeza (cache por sessão) */
+async function plInicioRegistro(){
+  if(PL_INICIO_REGISTRO_FIXO) return PL_INICIO_REGISTRO_FIXO;
+  if(_plInicioReg !== null) return _plInicioReg;
+  let ini = '';
+  try{
+    const snap = await withTimeout(fbRoot.orderByKey().startAt(encodeKey('checklist:')).limitToFirst(1).get(), 15000);
+    if(snap.exists()) snap.forEach(ch=>{ const k = decodeKey(ch.key); if(!ini && k.startsWith('checklist:')) ini = k.slice(10); });
+  }catch(e){
+    const hoje = p52Today(), lista = [];
+    for(let d=new Date(hoje.getFullYear(),0,1); d<=hoje; d.setDate(d.getDate()+1)) lista.push(dateStr(d));
+    for(let i=0; i<lista.length && !ini; i+=25){
+      const lote = lista.slice(i,i+25);
+      const rs = await Promise.all(lote.map(ds=>window.storage.get('checklist:'+ds,false).catch(()=>null)));
+      const j = rs.findIndex(r=>r && r.value); if(j>=0) ini = lote[j];
+    }
+  }
+  _plInicioReg = ini || '9999-12-31';
+  return _plInicioReg;
+}
+
 async function p52TryOpenChecklist(locName, turnKey, date, empName){
+  // Ambientes com plano próprio no catálogo (CCM, ESFERAS…): usa EXATAMENTE a lista do catálogo.
+  // Qualquer outro local segue o fluxo do Plano 52 sem nenhuma alteração.
+  const _tipoAmb = ambTipoDoLocal(locName);
+  if(_tipoAmb) return ambAbrirChecklist(_tipoAmb, locName, turnKey, date, empName);
   // Se o preload de boot ainda não terminou (race condition rara), aguarda até 3s por ele.
   if(!p52Atividades.length){
     for(let tries=0; tries<6 && !p52Atividades.length; tries++){
@@ -5557,6 +6010,13 @@ async function p52TryOpenChecklist(locName, turnKey, date, empName){
   if(!atvsDoLocal.length){
     console.log('[Plano52] áreas encontradas ('+areasEncontradas.join(', ')+') mas nenhuma atividade passou o filtro de turno/periodicidade para '+p52DateStr(date)+' turno '+turnKey+'.');
     return true;
+  }
+
+  // Plano genérico legado ("Limpeza geral do ambiente"): se TODAS as atividades que abririam são
+  // genéricas, usa a lista padrão do catálogo. Áreas com itens específicos seguem como estão.
+  if(atvsDoLocal.every(a => ambEhGenerico(a.atividade))){
+    const _tipoPadrao = ambTipoPlanoPadrao();
+    if(_tipoPadrao) return ambAbrirChecklist(_tipoPadrao, locName, turnKey, date, empName);
   }
 
   return new Promise(resolve => {
@@ -5643,6 +6103,7 @@ async function p52ConsolidatePreviousDay(){
 }
 
 function p52IsPlanned(atv, date){
+  if(typeof atv.plDia === 'function') return atv.plDia(date);   // item derivado do Plano de Limpeza
   if(atv.freq==='D') return true;
   if(atv.freq==='S') return date.getDay()===1;
   if(atv.freq==='Q'){ return p52WeekNum(date)%2===1; }
@@ -5795,8 +6256,8 @@ async function p52DoImport(file, onProgress){
 
   const all = [...atividades, ...extraAtv];
   onProgress('Gravando '+all.length+' atividades…');
-  await p52SaveAtividades(all);
-  p52Atividades = all;
+  await p52SaveAtividades(all);                       // alimenta apenas o LEGADO
+  p52Atividades = await p52LoadAtividades();          // a lista exibida é sempre derivada do Plano de Limpeza
 
   const meta = {importedAt: new Date().toISOString(), totalAtv:all.length, version:1};
   await p52SaveMeta(meta);
@@ -6037,7 +6498,7 @@ function renderP52Main(){
   </div>
   <select id="p52fArea" onchange="p52Filters.area=this.value;p52RenderCurrent()">
     <option value="">Todas as áreas</option>
-    ${[...new Set(p52Atividades.map(a=>a.area))].sort().map(a=>`<option>${a}</option>`).join('')}
+    ${[...new Set([...p52Atividades.map(a=>a.area), ...p52AreasSemAtividade])].sort().map(a=>`<option>${a}</option>`).join('')}
   </select>
   <select id="p52fTurno" onchange="p52Filters.turno=this.value;p52RenderCurrent()">
     <option value="">Todos os turnos</option>
@@ -6108,6 +6569,9 @@ async function p52RenderWeek(){
     p52StatusCache[ds] = statuses[ds];
   }));
 
+  plLimparCacheNR();
+  const _inicio = await plInicioRegistro();
+  const _chk = await plLerChecklists(days.filter(d=>d<=today));
   const d0=days[0], d6=days[6];
   const wn = p52WeekNum(days[3]);
 
@@ -6123,7 +6587,7 @@ async function p52RenderWeek(){
     for(const atv of atvs){
       if(!p52IsPlanned(atv,d)) continue;
       totalPlan++;
-      const st = statuses[ds]?.[atv.id]?.status;
+      const st = statuses[ds]?.[atv.id]?.status || plStatusPadrao(atv,d,_chk[ds],_inicio);
       if(st==='E') totalE++;
     }
   }
@@ -6182,7 +6646,7 @@ async function p52RenderWeek(){
         const isTod=ds===todayStr;
         const isFut=d>today;
         const planned=p52IsPlanned(atv,d);
-        const st = statuses[ds]?.[atv.id]?.status || (planned?(isFut?'future':'PE'):'NP');
+        const st = statuses[ds]?.[atv.id]?.status || (planned?(isFut?'future':plStatusPadrao(atv,d,_chk[ds],_inicio)):'NP');
         const resp = statuses[ds]?.[atv.id]?.resp||'';
         const manual = statuses[ds]?.[atv.id]?.manual||false;
 
@@ -6201,6 +6665,7 @@ async function p52RenderWeek(){
     }
   }
 
+  html+=p52LinhaAreasSemAtividade(3+days.length);
   html+='</tbody></table></div>';
   cont.innerHTML = html;
 }
@@ -6221,6 +6686,10 @@ async function p52RenderMonth(){
     promises.push(p52LoadStatusDay(ds).then(s=>{ statuses[ds]=s; }));
   }
   await Promise.all(promises);
+  plLimparCacheNR();
+  const _inicio = await plInicioRegistro();
+  const _diasMes = []; for(let d=1;d<=daysInMonth;d++){ const x=new Date(year,month,d); if(x<=today) _diasMes.push(x); }
+  const _chk = await plLerChecklists(_diasMes);
 
   let atvs = p52Atividades;
   if(p52Filters.area) atvs=atvs.filter(a=>a.area===p52Filters.area);
@@ -6234,7 +6703,7 @@ async function p52RenderMonth(){
     for(const atv of atvs){
       if(!p52IsPlanned(atv,dt)) continue;
       totP++;
-      if(statuses[ds]?.[atv.id]?.status==='E') totE++;
+      if((statuses[ds]?.[atv.id]?.status || plStatusPadrao(atv,dt,_chk[ds],_inicio))==='E') totE++;
     }
   }
   const pct=totP>0?Math.round(totE/totP*100):0;
@@ -6259,7 +6728,7 @@ async function p52RenderMonth(){
 <div class="p52-month-grid">`;
 
   for(const area of areas){
-    const areaAtvs=atvs.filter(a=>a.area===area).slice(0,8);
+    const areaTodas=atvs.filter(a=>a.area===area), areaAtvs=areaTodas.slice(0,8);
     if(!areaAtvs.length) continue;
     html+=`<div class="p52-month-card"><div class="p52-month-card-head">${area}</div>`;
     for(const atv of areaAtvs){
@@ -6270,7 +6739,7 @@ async function p52RenderMonth(){
         const isFut=dt>today;
         if(!p52IsPlanned(atv,dt)){mini+=`<div class="p52-mini-d" style="background:var(--panel-2);opacity:.3;"></div>`;continue;}
         total++;
-        const st=statuses[ds]?.[atv.id]?.status||(isFut?'future':'PE');
+        const st=statuses[ds]?.[atv.id]?.status||(isFut?'future':plStatusPadrao(atv,dt,_chk[ds],_inicio));
         if(st==='E') exec++;
         const bg={E:'var(--ok)',PE:'var(--amber)',NR:'var(--bad)',R:'#a78bfa',future:'var(--panel-2)'}[st]||'var(--panel-2)';
         const op=isFut?'opacity:.25;':'';
@@ -6286,9 +6755,11 @@ async function p52RenderMonth(){
         </div>
       </div>`;
     }
+    if(areaTodas.length > areaAtvs.length) html+=`<div class="p52-month-row" style="font-size:11px;color:var(--text-dim);">+ ${areaTodas.length-areaAtvs.length} atividade(s) desta área — veja nas visões Semana/Anual</div>`;
     html+='</div>';
   }
   html+='</div>';
+  { const _v = p52LinhaAreasSemAtividade(1); if(_v) html+='<table style="width:100%;margin-top:14px;"><tbody>'+_v+'</tbody></table>'; }
   cont.innerHTML=html;
 }
 
@@ -6344,6 +6815,7 @@ async function p52RenderAnnual(){
       html+=`</tr>`;
     });
   }
+  html+=p52LinhaAreasSemAtividade(14);
   html+=`</tbody></table></div>`;
   cont.innerHTML=html;
 }
@@ -6411,7 +6883,7 @@ function p52ShowUpdateModal(){
     try{
       const {ws}=await p52ParseExcel(e.target.files[0]);
       const {atividades:newAtvs}=p52ExtractFromSheet(ws);
-      const oldIds=new Set(p52Atividades.filter(a=>a.fonte==='excel').map(a=>a.id));
+      const oldIds=new Set(p52LegadoCache.filter(a=>a.fonte==='excel').map(a=>a.id));
       const newIds=new Set(newAtvs.map(a=>a.id));
       const added=newAtvs.filter(a=>!oldIds.has(a.id)).length;
       const removed=[...oldIds].filter(id=>!newIds.has(id)).length;
@@ -6432,10 +6904,10 @@ function p52ShowUpdateModal(){
 
 async function p52ApplyUpdate(){
   const newAtvs = window._p52PendingUpdate || [];
-  const extras = p52Atividades.filter(a=>a.fonte==='extra');
+  const extras = p52LegadoCache.filter(a=>a.fonte==='extra');
   const all = [...newAtvs, ...extras];
-  await p52SaveAtividades(all);
-  p52Atividades = all;
+  await p52SaveAtividades(all);                       // alimenta apenas o LEGADO
+  p52Atividades = await p52LoadAtividades();          // a lista exibida é sempre derivada do Plano de Limpeza
   const meta = {importedAt:new Date().toISOString(), totalAtv:all.length, version:(p52Meta?.version||1)+1};
   await p52SaveMeta(meta);
   p52Meta=meta;
@@ -8212,31 +8684,23 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
 <!-- ===== Plano 52 Semanas — Exportação no Excel modelo ===== -->
 <script>
 /* =====================================================================
-   PLANO 52 SEMANAS — EXPORTAÇÃO NO EXCEL MODELO
+   PLANO 52 SEMANAS — EXPORTAÇÃO NO EXCEL (modelo = VISUAL · sistema = CONTEÚDO)
    ---------------------------------------------------------------------
-   Abre o arquivo modelo (modelo-plano-52-semanas.xlsx, no repositório,
-   ao lado do index.html), preenche as células de cada atividade/data e
-   gera uma CÓPIA para download. O modelo nunca é alterado.
+   A planilha de referência (modelo-plano-52-semanas.xlsx) define COMO o arquivo
+   parece: cabeçalho, logos, painéis congelados, larguras, alturas, bordas,
+   fontes, mesclagens, estilos por posição na área e a estrutura das semanas.
+   O SISTEMA define O QUE aparece: áreas, atividades, planejado, execução e
+   pendências — pela MESMA lista (p52Atividades, derivada do Plano de Limpeza) e
+   pela MESMA regra de status da tela do Plano 52 (p52RenderWeek).
 
-   Para preservar 100% do layout, o arquivo NÃO é reconstruído por uma
-   biblioteca de planilhas: o .xlsx é aberto como pacote (JSZip) e só os
-   valores das células de data são alterados no XML da aba. Mesclagens,
-   larguras, alturas, cores, fontes, imagens, validações, painéis
-   congelados e impressão ficam exatamente como no modelo.
-
-   Estrutura do modelo (aba " Plan  PT"):
-     linha de meses (JANEIRO…) · linha dos dias da semana · linha dos dias do mês
-     cada atividade ocupa 2 linhas:  1ª = Planejado ("P")  ·  2ª = Status (E/PE/NR/R)
-     uma coluna em branco separa cada semana (domingo → sábado)
-
-   Regra de status (a mesma da tela do Plano 52 Sem.):
-     status gravado no sistema → código gravado
-     sem registro, com limpeza concluída no Plano de Limpeza → E
-     sem registro, data passada, prevista → PE
-     sem registro, data passada, não prevista → NP
-     data futura → status vazio (linha "Planejado" recebe P quando prevista)
-   Células já preenchidas no modelo e sem registro no sistema são mantidas
-   (histórico lançado manualmente).
+   Nenhum valor do modelo é copiado: as linhas de atividade são GERADAS (quantas
+   forem), com o estilo clonado das linhas-modelo (primeira/meio/última da área),
+   e o calendário é regenerado com as semanas do sistema (segunda → domingo).
+   O arquivo NÃO é reconstruído por uma biblioteca de planilhas: o .xlsx é aberto
+   como pacote (JSZip) e só a aba do Plano 52 e os estilos de status são reescritos.
+   Cores de status: E verde · NR vermelho · NP amarelo (as do modelo). O modelo nomeia
+   PE (Pendente) e R (Reprogramado) na legenda, mas não define cor para eles: usam as
+   cores da tela do Plano 52 (âmbar e roxo), explicadas numa linha abaixo da grade.
    ===================================================================== */
 (function(){
   'use strict';
@@ -8273,7 +8737,11 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
   const serializar = doc => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
     new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, '');
 
-  async function abrirModelo(buf){
+  /* ------------------------------------------------------------------
+     MODELO = VISUAL.  Abre o pacote .xlsx e lê a aba do Plano 52 como TEXTO
+     (sem DOM, pois a aba tem ~30 MB). Nada do conteúdo antigo é usado.
+     ------------------------------------------------------------------ */
+  async function abrirModeloTxt(buf){
     const zip = await JSZip.loadAsync(buf);
     const wbDoc = parseXml(await lerTexto(zip, 'xl/workbook.xml'));
     const relsDoc = parseXml(await lerTexto(zip, 'xl/_rels/workbook.xml.rels'));
@@ -8282,100 +8750,14 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
     if(!aba) throw new Error('A aba "Plan PT" não foi encontrada no modelo.');
     const rid = aba.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id') || aba.getAttribute('r:id');
     const rel = [...relsDoc.getElementsByTagName('Relationship')].find(r=>r.getAttribute('Id')===rid);
-    let alvo = rel.getAttribute('Target').replace(/^\//,'');
+    const alvo = rel.getAttribute('Target').replace(/^\//,'');
     const caminho = alvo.startsWith('xl/') ? alvo : 'xl/'+alvo;
-
     const sst = [];
     const sstTxt = await lerTexto(zip, 'xl/sharedStrings.xml');
-    if(sstTxt){
-      const sd = parseXml(sstTxt);
-      [...sd.getElementsByTagNameNS(NS,'si')].forEach(si=>{
-        sst.push([...si.getElementsByTagNameNS(NS,'t')].map(t=>t.textContent).join(''));
-      });
-    }
-    const xmlOriginal = await lerTexto(zip, caminho);
-    const doc = parseXml(xmlOriginal);
-    if(doc.getElementsByTagName('parsererror').length) throw new Error('Não foi possível ler a aba do modelo.');
-    return {zip, caminho, doc, sst, nomeAba: aba.getAttribute('name'), xmlOriginal};
-  }
-
-  function indexarCelulas(M){
-    const linhas = new Map();
-    [...M.doc.getElementsByTagNameNS(NS,'row')].forEach(row=>{
-      const cells = new Map();
-      [...row.getElementsByTagNameNS(NS,'c')].forEach(c=>{ cells.set(splitRef(c.getAttribute('r'))[0], c); });
-      linhas.set(+row.getAttribute('r'), {el:row, cells});
-    });
-    M.linhas = linhas;
-    M.valor = (r, c)=>{
-      const L = linhas.get(r); if(!L) return null;
-      const cel = L.cells.get(c); if(!cel) return null;
-      const t = cel.getAttribute('t');
-      if(t==='inlineStr'){ const is = cel.getElementsByTagNameNS(NS,'t'); return is.length ? [...is].map(x=>x.textContent).join('') : null; }
-      const v = cel.getElementsByTagNameNS(NS,'v')[0]; if(!v) return null;
-      if(t==='s') return M.sst[+v.textContent];
-      if(t==='b') return v.textContent==='1';
-      return v.textContent;
-    };
-  }
-
-  // Descobre cabeçalho, colunas de dados, calendário e as atividades do modelo
-  function mapearModelo(M){
-    let hdr = null;
-    for(const [r] of [...M.linhas].sort((a,b)=>a[0]-b[0])){
-      for(let c=1;c<=20;c++){ if(norm(M.valor(r,c))==='area'){ hdr = {row:r, colArea:c}; break; } }
-      if(hdr) break;
-    }
-    if(!hdr) throw new Error('Cabeçalho "Área" não encontrado no modelo.');
-    const achar = (txt)=>{ for(let c=1;c<=30;c++){ if(norm(M.valor(hdr.row,c)).startsWith(txt)) return c; } return 0; };
-    const cAtv = achar('atividade'), cFreq = achar('frequencia'), cTurno = achar('turno');
-    if(!cAtv || !cFreq) throw new Error('Colunas "Atividade"/"Frequência" não encontradas no modelo.');
-    const rMes = hdr.row-1, rDia = hdr.row+1;
-
-    // colunas de data: têm número do dia na linha de dias
-    const maxCol = Math.max(...[...M.linhas.values()].map(L=>Math.max(0,...L.cells.keys())));
-    const colsDia = [];
-    for(let c=cTurno+1; c<=maxCol; c++){
-      const v = M.valor(rDia, c);
-      if(v!=null && v!=='' && !isNaN(+v)) colsDia.push({col:c, dia:+v});
-    }
-    if(!colsDia.length) throw new Error('Linha de datas não encontrada no modelo.');
-    // 1º de janeiro = primeira coluna com dia 1 a partir do rótulo JANEIRO
-    let cJan = 0;
-    for(let c=1;c<=maxCol;c++){ if(norm(M.valor(rMes,c)).startsWith('jan')){ cJan = c; break; } }
-    const idxJan = colsDia.findIndex(x=>x.col>=cJan && x.dia===1);
-    if(idxJan<0) throw new Error('Não foi possível localizar 1º de janeiro no modelo.');
-    // ano: aquele em que a sequência de datas bate com todos os dias do modelo
-    const anoBase = new Date().getFullYear();
-    let melhor = null;
-    for(const ano of [anoBase-1, anoBase, anoBase+1]){
-      let erros = 0;
-      const cols = colsDia.map((x,i)=>{ const d = new Date(ano,0,1+(i-idxJan)); if(d.getDate()!==x.dia) erros++; return {col:x.col, date:d, dia:x.dia}; });
-      // a letra do dia da semana no cabeçalho (D S T Q Q S S) também precisa bater
-      const LET = ['D','S','T','Q','Q','S','S'];
-      cols.forEach(x=>{ const l = String(M.valor(hdr.row, x.col)||'').trim().toUpperCase(); if(l && l!==LET[x.date.getDay()]) erros++; });
-      if(!melhor || erros<melhor.erros) melhor = {ano, erros, cols};
-    }
-    // semanas: colunas separadoras entre blocos de 7 dias
-    const semanas = []; let atual = [];
-    melhor.cols.forEach((x,i)=>{
-      if(i>0 && x.col !== melhor.cols[i-1].col+1 && atual.length){ semanas.push(atual); atual = []; }
-      atual.push(x);
-    });
-    if(atual.length) semanas.push(atual);
-
-    // atividades: linha "Planejado" (tem frequência) + linha seguinte de status
-    const slots = []; let area = '';
-    const linhasOrd = [...M.linhas.keys()].filter(r=>r>rDia).sort((a,b)=>a-b);
-    for(const r of linhasOrd){
-      const a = M.valor(r, hdr.colArea);
-      if(a!=null && String(a).trim()) area = String(a).trim();
-      const atv = M.valor(r, cAtv), fr = M.valor(r, cFreq);
-      if(atv!=null && String(atv).trim() && fr!=null && String(fr).trim()){
-        slots.push({rowPlan:r, rowStatus:r+1, area, atividade:String(atv).trim(), freq:String(fr).trim()});
-      }
-    }
-    return {hdr, cAtv, cFreq, cTurno, rDia, ano:melhor.ano, errosCalendario:melhor.erros, cols:melhor.cols, semanas, slots};
+    if(sstTxt){ [...parseXml(sstTxt).getElementsByTagNameNS(NS,'si')].forEach(si=>sst.push([...si.getElementsByTagNameNS(NS,'t')].map(t=>t.textContent).join(''))); }
+    const xml = await lerTexto(zip, caminho);
+    if(!xml || xml.indexOf('<sheetData>')<0) throw new Error('Não foi possível ler a aba do modelo.');
+    return {zip, caminho, xml, sst, nomeAba: aba.getAttribute('name')};
   }
 
   /* ------------------------------------------------------------------
@@ -8401,111 +8783,142 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
   }
   const parseJson = v => { if(v==null) return null; if(typeof v==='object') return v; try{ return JSON.parse(v); }catch(e){ return null; } };
 
-  // Mesmo vínculo usado pela sincronização do Plano 52 com o Plano de Limpeza
-  function atvCasaComLocal(a, locName){
-    if(a.fonte==='extra') return p52MatchLocal(a.area, locName);
-    if(P52_ALIAS_MULTI[a.area]) return P52_ALIAS_MULTI[a.area].some(n=>p52MatchLocal(n, locName));
-    const oficial = (a.area in P52_ALIAS) ? P52_ALIAS[a.area] : a.area;
-    return oficial ? p52MatchLocal(oficial, locName) : false;
-  }
+  /* ==================================================================
+     NOVO MOTOR — o MODELO define o VISUAL; o SISTEMA define o CONTEÚDO
+       modelo  → cabeçalho, calendário (estrutura), estilos por posição, mesclagens, painéis, larguras
+       sistema → áreas, atividades, planejado, status (mesma lista e mesma regra da TELA do Plano 52)
+     ================================================================== */
+  const COR_STATUS = {E:'FF00FF00', NR:'FFFF0000', NP:'FFFFFF00', PE:'FFFFC000', R:'FFB4A7D6'};   // E/NR/NP = cores da legenda do modelo
+  const LETRAS_DIA = ['D','L','M','M','J','V','S'];            // iniciais usadas pelo modelo, indexadas por Date.getDay()
+  const COLS_MESCLA_ATV = [5,6,7,8,9,12,13];                   // E F G H I L M (mescladas nas 2 linhas de cada atividade)
+  const LINHAS_FINAIS = 40;                                    // linhas brancas ao final (o modelo tem ~1000, só estética)
+  const attr = (a, n) => { const m = new RegExp('(?:^|\\s)'+n+'="([^"]*)"').exec(a); return m ? m[1] : null; };
+  const escXml = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const desescXml = s => String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+  const COLREF = []; const refCol = n => COLREF[n] || (COLREF[n] = colLet(n));
 
-  /* ------------------------------------------------------------------
-     Vínculo sistema ↔ modelo
-     ------------------------------------------------------------------ */
-  const areaEquiv = a => { const o = (a in P52_ALIAS) ? P52_ALIAS[a] : a; return norm(o||a); };
-  function vincular(slots, atividades){
-    const chave = (area, atv) => norm(area)+'|'+norm(atv);
-    const chave2 = (area, atv) => areaEquiv(area)+'|'+norm(atv);
-    const ocorr = new Map(), porChave = new Map(), porChave2 = new Map();
-    slots.forEach(s=>{
-      const k = chave(s.area, s.atividade);
-      const n = (ocorr.get(k)||0); ocorr.set(k, n+1); s.ocorrencia = n;
-      porChave.set(k+'#'+n, s);
-      const k2 = chave2(s.area, s.atividade)+'#'+n; if(!porChave2.has(k2)) porChave2.set(k2, s);
-    });
-    const ocorrSis = new Map(), vinc = [], naoVinc = [], usados = new Set();
-    atividades.forEach(a=>{
-      const k = chave(a.area, a.atividade);
-      const n = (ocorrSis.get(k)||0); ocorrSis.set(k, n+1);
-      let s = porChave.get(k+'#'+n) || porChave2.get(chave2(a.area, a.atividade)+'#'+n);
-      if(s && usados.has(s.rowPlan)) s = null;
-      if(s){ usados.add(s.rowPlan); vinc.push({slot:s, atv:a}); }
-      else naoVinc.push({area:a.area, atividade:a.atividade, turno:a.turno, freq:a.freq,
-                         motivo: a.fonte==='extra' ? 'Área criada no sistema, não existe no modelo' : 'Área/atividade não encontrada no modelo'});
-    });
-    const semSistema = slots.filter(s=>!usados.has(s.rowPlan));
-    return {vinc, naoVinc, semSistema};
+  function indexarLinhas(body){
+    const pos = [], re = /<row r="(\d+)"/g; let m;
+    while((m = re.exec(body))) pos.push([+m[1], m.index]);
+    const idx = new Map();
+    pos.forEach((p,i)=>idx.set(p[0], [p[1], i+1<pos.length ? pos[i+1][1] : body.length]));
+    return idx;
   }
-
-  /* ------------------------------------------------------------------
-     Escrita no XML
-     ------------------------------------------------------------------ */
-  function escreverCelula(M, r, c, texto, estiloSeVazia){
-    const L = M.linhas.get(r); if(!L) return false;
-    let cel = L.cells.get(c);
-    if(!cel){
-      cel = M.doc.createElementNS(NS, 'c');
-      cel.setAttribute('r', colLet(c)+r);
-      if(estiloSeVazia!=null) cel.setAttribute('s', estiloSeVazia);
-      const prox = [...L.cells.keys()].filter(k=>k>c).sort((a,b)=>a-b)[0];
-      L.el.insertBefore(cel, prox ? L.cells.get(prox) : null);
-      L.cells.set(c, cel);
-    } else if(estiloSeVazia!=null && M.valor(r,c)==null){
-      cel.setAttribute('s', estiloSeVazia);
+  function parseLinha(xml){
+    const mh = /^<row r="(\d+)"([^>]*?)(\/?)>/.exec(xml);
+    if(!mh) return null;
+    const cels = [];
+    if(!mh[3]){
+      const re = /<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g; let m;
+      while((m = re.exec(xml))) cels.push({col: colNum(m[1]), attrs: m[2], inner: m[3]||''});
     }
-    while(cel.firstChild) cel.removeChild(cel.firstChild);
-    cel.setAttribute('t', 'inlineStr');
-    const is = M.doc.createElementNS(NS, 'is'), t = M.doc.createElementNS(NS, 't');
-    t.textContent = texto; is.appendChild(t); cel.appendChild(is);
-    return true;
+    return {r:+mh[1], attrs: mh[2].replace(/\sspans="[^"]*"/,''), cels};
+  }
+  const valorDe = (c, sst) => {
+    const t = attr(c.attrs,'t');
+    if(t==='inlineStr'){ const m = /<t[^>]*>([\s\S]*?)<\/t>/.exec(c.inner); return m ? desescXml(m[1]) : ''; }
+    const m = /<v>([\s\S]*?)<\/v>/.exec(c.inner); if(!m) return null;
+    return t==='s' ? (sst[+m[1]]||'') : m[1];
+  };
+  const celXml = (col, r, s, v) => {
+    const ref = refCol(col)+r, sa = (s!=null && s!=='') ? ' s="'+s+'"' : '';
+    if(v==null || v==='') return '<c r="'+ref+'"'+sa+'/>';
+    if(typeof v==='number') return '<c r="'+ref+'"'+sa+'><v>'+v+'</v></c>';
+    return '<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+escXml(v)+'</t></is></c>';
+  };
+  const linhaXml = (r, attrs, partes) => '<row r="'+r+'"'+attrs+'>'+partes.join('')+'</row>';
+
+  /* Descobre cabeçalho, colunas de dia, semanas e as linhas-modelo (estilo por posição na área) */
+  function mapearModelo2(M){
+    const i0 = M.xml.indexOf('<sheetData>'), i1 = M.xml.indexOf('</sheetData>');
+    const head = M.xml.slice(0,i0), body = M.xml.slice(i0+11,i1), tail = M.xml.slice(i1+12);
+    const idx = indexarLinhas(body);
+    const L = r => { const p = idx.get(r); return p ? parseLinha(body.slice(p[0],p[1])) : null; };
+    let hdr = null;
+    for(let r=1;r<=40 && !hdr;r++){
+      const lin = L(r); if(!lin) continue;
+      for(const c of lin.cels){ if(c.col<=20 && norm(valorDe(c,M.sst))==='area'){ hdr = {row:r, colArea:c.col, lin}; break; } }
+    }
+    if(!hdr) throw new Error('Cabeçalho "Área" não encontrado no modelo.');
+    const achar = txt => { const c = hdr.lin.cels.find(c=>c.col<=30 && norm(valorDe(c,M.sst)).startsWith(txt)); return c ? c.col : 0; };
+    const cAtv = achar('atividade'), cFreq = achar('frequencia'), cTurno = achar('turno');
+    if(!cAtv || !cFreq || !cTurno) throw new Error('Colunas "Atividade"/"Frequência"/"Turno" não encontradas no modelo.');
+    const rMes = hdr.row-1, rDia = hdr.row+1, linDia = L(rDia);
+    if(!linDia || !L(rMes)) throw new Error('Linhas de meses/dias não encontradas no modelo.');
+    const colsDia = linDia.cels.filter(c=>c.col>cTurno+1).map(c=>({col:c.col, v:valorDe(c,M.sst)})).filter(x=>x.v!=null && x.v!=='' && !isNaN(+x.v));
+    if(!colsDia.length) throw new Error('Linha de datas não encontrada no modelo.');
+    const blocos = []; let atual = [];
+    colsDia.forEach((x,i)=>{ if(i>0 && x.col!==colsDia[i-1].col+1 && atual.length){ blocos.push(atual); atual = []; } atual.push(x.col); });
+    if(atual.length) blocos.push(atual);
+    if(blocos.some(b=>b.length!==7)) throw new Error('O calendário do modelo não está organizado em semanas de 7 dias.');
+    const mm = /<mergeCells[^>]*>([\s\S]*?)<\/mergeCells>/.exec(tail);
+    const merges = mm ? [...mm[1].matchAll(/ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/g)].map(m=>({c1:colNum(m[1]), r1:+m[2], c2:colNum(m[3]), r2:+m[4]})) : [];
+    const primeira = rDia+2;
+    const areasM = merges.filter(m=>m.c1===hdr.colArea && m.c2===hdr.colArea && m.r1>=primeira).sort((a,b)=>a.r1-b.r1);
+    if(!areasM.length) throw new Error('Não foi possível identificar o desenho de uma área no modelo.');
+    const ref = areasM.find(a=>(a.r2-a.r1+1)/2>=3) || areasM.find(a=>(a.r2-a.r1+1)/2>=2) || areasM[0];
+    const n = (ref.r2-ref.r1+1)/2;
+    const T = { priPlano:L(ref.r1), priStatus:L(ref.r1+1),
+                meioPlano:L(n>=3 ? ref.r1+2 : ref.r1), meioStatus:L(n>=3 ? ref.r1+3 : ref.r1+1),
+                ultPlano:L(ref.r2-1), ultStatus:L(ref.r2) };
+    if(Object.values(T).some(x=>!x)) throw new Error('Linhas-modelo de atividade incompletas.');
+    const ultModelo = Math.max(...areasM.map(a=>a.r2));
+    return {head, body, tail, idx, L, hdr, cAtv, cFreq, cTurno, rMes, rDia, primeira, blocos, merges, T, pad: L(ultModelo+1), ultModelo};
   }
 
-  // estilo mais usado nas células de status já preenchidas do modelo (fundo verde do modelo)
-  function estiloStatus(M, mapa){
-    const cont = {};
-    mapa.slots.forEach(s=>{
-      mapa.cols.forEach(x=>{
-        const v = M.valor(s.rowStatus, x.col);
-        if(v!=null && v!==''){ const st = M.linhas.get(s.rowStatus)?.cells.get(x.col)?.getAttribute('s'); if(st) cont[st]=(cont[st]||0)+1; }
-      });
-    });
-    return Object.entries(cont).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+  /* Calendário do SISTEMA: mesmas semanas da tela (segunda → domingo; a 1ª contém 1º/jan) */
+  function calendarioSistema(ano){
+    const jan1 = new Date(ano,0,1), dow = jan1.getDay();
+    const seg = new Date(ano,0,1-(dow===0 ? 6 : dow-1));
+    const semanas = [];
+    for(let d=new Date(seg); d<=new Date(ano,11,31); d.setDate(d.getDate()+7)){
+      const dias = []; for(let i=0;i<7;i++){ const x = new Date(d); x.setDate(d.getDate()+i); dias.push(x); }
+      semanas.push(dias);
+    }
+    return semanas;
   }
 
-  // Amplia a formatação condicional do próprio modelo para todas as semanas
-  // e garante que "NP" não fique laranja (a regra do modelo pinta tudo que contém "P")
-  async function ajustarFormatacao(M, mapa, usouNP){
-    const first = mapa.cols[0].col, last = mapa.cols[mapa.cols.length-1].col;
-    const r1 = mapa.slots[0].rowPlan, r2 = mapa.slots[mapa.slots.length-1].rowStatus;
-    const faixa = colLet(first)+r1+':'+colLet(last)+r2;
-    const cfs = [...M.doc.getElementsByTagNameNS(NS,'conditionalFormatting')];
-    let ampliadas = 0;
-    cfs.forEach(cf=>{
-      const sq = cf.getAttribute('sqref')||'';
-      const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(sq);
-      if(m && colNum(m[1])===first && +m[2]===r1 && sq!==faixa){ cf.setAttribute('sqref', faixa); ampliadas++; }
-    });
-    if(!usouNP || !cfs.length) return {ampliadas, np:false};
-    const stTxt = await lerTexto(M.zip, 'xl/styles.xml');
-    const st = parseXml(stTxt);
-    let dxfs = st.getElementsByTagNameNS(NS,'dxfs')[0];
-    if(!dxfs) return {ampliadas, np:false};
-    const dxf = st.createElementNS(NS,'dxf');
-    const font = st.createElementNS(NS,'font'); const color = st.createElementNS(NS,'color'); color.setAttribute('rgb','FF7F7F7F'); font.appendChild(color);
-    const fill = st.createElementNS(NS,'fill'); const pf = st.createElementNS(NS,'patternFill'); pf.setAttribute('patternType','solid');
-    const fg = st.createElementNS(NS,'fgColor'); fg.setAttribute('rgb','FFFFFFFF'); const bg = st.createElementNS(NS,'bgColor'); bg.setAttribute('rgb','FFFFFFFF');
-    pf.appendChild(fg); pf.appendChild(bg); fill.appendChild(pf); dxf.appendChild(font); dxf.appendChild(fill);
-    const dxfId = dxfs.getElementsByTagNameNS(NS,'dxf').length;
-    dxfs.appendChild(dxf); dxfs.setAttribute('count', String(dxfId+1));
-    M.zip.file('xl/styles.xml', serializar(st), {createFolders:false});
-    [...M.doc.getElementsByTagNameNS(NS,'cfRule')].forEach(r=>r.setAttribute('priority', String((+r.getAttribute('priority')||0)+1)));
-    const cf = M.doc.createElementNS(NS,'conditionalFormatting'); cf.setAttribute('sqref', faixa);
-    const rule = M.doc.createElementNS(NS,'cfRule');
-    [['type','containsText'],['dxfId',String(dxfId)],['priority','1'],['stopIfTrue','1'],['operator','containsText'],['text','NP']].forEach(([k,v])=>rule.setAttribute(k,v));
-    const f = M.doc.createElementNS(NS,'formula'); f.textContent = 'NOT(ISERROR(SEARCH("NP",'+colLet(first)+r1+')))';
-    rule.appendChild(f); cf.appendChild(rule);
-    cfs[0].parentNode.insertBefore(cf, cfs[0]);
-    return {ampliadas, np:true};
+  /* Estilos derivados: mesma borda/fonte/alinhamento do modelo, com a cor da legenda por status */
+  async function abrirEstilos(M){
+    const doc = parseXml(await lerTexto(M.zip,'xl/styles.xml'));
+    const fills = doc.getElementsByTagNameNS(NS,'fills')[0], xfs = doc.getElementsByTagNameNS(NS,'cellXfs')[0];
+    const cache = new Map();
+    const fillPara = rgb => {
+      if(!rgb) return '0';
+      const lista = [...fills.getElementsByTagNameNS(NS,'fill')];
+      const i = lista.findIndex(f=>{ const pf = f.getElementsByTagNameNS(NS,'patternFill')[0], fg = pf && pf.getElementsByTagNameNS(NS,'fgColor')[0];
+                                     return pf && pf.getAttribute('patternType')==='solid' && fg && fg.getAttribute('rgb')===rgb; });
+      if(i>=0) return String(i);
+      const f = doc.createElementNS(NS,'fill'), pf = doc.createElementNS(NS,'patternFill'); pf.setAttribute('patternType','solid');
+      const fg = doc.createElementNS(NS,'fgColor'); fg.setAttribute('rgb',rgb);
+      const bg = doc.createElementNS(NS,'bgColor'); bg.setAttribute('indexed','64');
+      pf.appendChild(fg); pf.appendChild(bg); f.appendChild(pf); fills.appendChild(f); fills.setAttribute('count', String(lista.length+1));
+      return String(lista.length);
+    };
+    const derivar = (base, rgb, h) => {
+      const k = base+'|'+(rgb||'-')+'|'+(h||'center'); if(cache.has(k)) return cache.get(k);
+      const lista = [...xfs.getElementsByTagNameNS(NS,'xf')], orig = lista[+base];
+      if(!orig){ cache.set(k,+base); return +base; }
+      const novo = orig.cloneNode(true);
+      novo.setAttribute('fillId', fillPara(rgb)); novo.setAttribute('applyFill','1');
+      let al = novo.getElementsByTagNameNS(NS,'alignment')[0];
+      if(!al){ al = doc.createElementNS(NS,'alignment'); novo.insertBefore(al, novo.firstChild); }
+      al.setAttribute('horizontal', h||'center'); al.setAttribute('vertical','center'); novo.setAttribute('applyAlignment','1');
+      xfs.appendChild(novo); xfs.setAttribute('count', String(lista.length+1));
+      cache.set(k, lista.length); return lista.length;
+    };
+    return {derivar, novos:()=>cache.size, salvar:()=>M.zip.file('xl/styles.xml', serializar(doc), {createFolders:false})};
+  }
+
+  /* Estado de uma célula = EXATAMENTE a regra da tela (p52RenderWeek):
+       st = status gravado || (previsto ? (futuro ? 'future' : 'PE') : 'NP')
+       futuro → vazio ('·') · não previsto → NP ('—') · previsto → st                         */
+  function estadoDaCelula(atv, date, hoje, statusDia, chkDia, inicio){
+    const fut = date > hoje, prev = p52IsPlanned(atv, date);
+    if(fut) return {prev, cod:null};
+    if(!prev) return {prev:false, cod:'NP'};
+    const reg = statusDia[dsOf(date)] && statusDia[dsOf(date)][atv.id] && statusDia[dsOf(date)][atv.id].status;
+    return {prev:true, cod: reg || plStatusPadrao(atv, date, (chkDia||{})[dsOf(date)], inicio)};
   }
 
   /* ------------------------------------------------------------------
@@ -8563,7 +8976,7 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
     await carregarScript(JSZIP_URL);
     const {buf, origem} = await obterModelo(opts, progresso);
     let M;
-    try{ M = await abrirModelo(buf); }
+    try{ M = await abrirModeloTxt(buf); }
     catch(e){ const err = new Error('O arquivo de modelo não pôde ser lido: '+(e.message||e)); err.semModelo = !!opts.arquivoModelo; throw err; }
     let modeloSalvo = false;
     if(opts.arquivoModelo && opts.salvarModelo && isAdmin){
@@ -8571,103 +8984,147 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
       try{ await salvarModelo(opts.arquivoModelo, buf); modeloSalvo = true; }
       catch(e){ console.warn('[P52 export] não foi possível salvar o modelo', e); }
     }
-    indexarCelulas(M);
-    const mergesAntes = M.doc.getElementsByTagNameNS(NS,'mergeCell').length;
-    const celulasAntes = M.doc.getElementsByTagNameNS(NS,'c').length;
-    const mapa = mapearModelo(M);
+    progresso('Analisando o layout do modelo…');
+    const A = mapearModelo2(M);
 
-    progresso('Lendo as atividades do sistema…');
-    if(!p52Atividades.length){ p52Atividades = await p52LoadAtividades(); }
-    const todas = p52Atividades.slice();
-    const filtradas = todas.filter(a=>
+    // ── CONTEÚDO: MESMA lista e MESMO resolvedor que a tela do Plano 52 usa ──
+    progresso('Lendo as áreas e atividades do Plano 52…');
+    p52Atividades = await p52LoadAtividades();
+    const filtradas = p52Atividades.filter(a=>
       (!opts.area || a.area===opts.area) &&
       (!opts.turno || String(a.turno||'').includes(opts.turno)) &&
       (!opts.freq || a.freq===opts.freq));
-    const {vinc, naoVinc, semSistema} = vincular(mapa.slots, filtradas);
-
-    const ini = dsOf(mapa.cols[0].date), fim = dsOf(mapa.cols[mapa.cols.length-1].date);
-    const hoje = p52Today(); const hojeDs = dsOf(hoje);
-    progresso('Lendo os status registrados ('+brOf(mapa.cols[0].date)+' a '+brOf(mapa.cols[mapa.cols.length-1].date)+')…');
+    const hoje = p52Today(), ano = hoje.getFullYear();
+    const semanas = calendarioSistema(ano);
+    if(semanas.length > A.blocos.length) throw new Error('O modelo comporta '+A.blocos.length+' semanas e o calendário de '+ano+' tem '+semanas.length+'.');
+    const dias = semanas.flat(), ini = dsOf(dias[0]), fim = dsOf(dias[dias.length-1]);
+    progresso('Lendo os status registrados ('+brOf(dias[0])+' a '+brOf(dias[dias.length-1])+')…');
     const statusRaw = await lerFaixa('p52:status:', ini, fim);
+    const statusDia = {}; Object.entries(statusRaw).forEach(([ds,v])=>{ const o = parseJson(v); if(o) statusDia[ds] = o; });
     progresso('Lendo as execuções do Plano de Limpeza…');
-    const checkRaw = hojeDs >= ini ? await lerFaixa('checklist:', ini, hojeDs < fim ? hojeDs : fim) : {};
+    const hojeDs = dsOf(hoje), chkRaw = await lerFaixa('checklist:', ini, hojeDs<fim ? hojeDs : fim), chkDia = {};
+    dias.filter(d=>d<=hoje).forEach(d=>{ const ds = dsOf(d); chkDia[ds] = parseJson(chkRaw[ds]) || {}; });
+    plLimparCacheNR(); const inicioReg = await plInicioRegistro();
 
-    const status = {}; Object.entries(statusRaw).forEach(([ds,v])=>{ const o = parseJson(v); if(o) status[ds] = o; });
-    const feitos = {};  // ds -> [locais concluídos]
-    Object.entries(checkRaw).forEach(([ds,v])=>{
-      const o = parseJson(v); if(!o) return;
-      const locs = new Set();
-      Object.entries(o).forEach(([k,e])=>{ const st = e && (typeof e==='string' ? e : e.state); if(st==='done') locs.add(k.split('|')[0]); });
-      if(locs.size) feitos[ds] = [...locs];
-    });
+    // calendário: coluna do modelo ↔ data do sistema
+    const colData = new Map(), usedCols = [];
+    semanas.forEach((sem,b)=>sem.forEach((d,i)=>{ const c = A.blocos[b][i]; colData.set(c, d); usedCols.push(c); }));
+    const lastCol = A.blocos[semanas.length-1][6], firstDayCol = A.blocos[0][0];
+    const colDoDia = new Map(); colData.forEach((d,c)=>colDoDia.set(dsOf(d), c));
 
-    progresso('Preenchendo as semanas…');
-    const estStatus = estiloStatus(M, mapa);
-    const cont = {P:0, E:0, PE:0, NR:0, R:0, NP:0};
-    let preservadas = 0, substituidas = 0, idsDuplicados = 0;
-    const idsVistos = new Map();
-    vinc.forEach(({atv})=>idsVistos.set(atv.id, (idsVistos.get(atv.id)||0)+1));
-    idsDuplicados = [...idsVistos.values()].filter(n=>n>1).length;
-
-    for(const {slot, atv} of vinc){
-      for(const x of mapa.cols){
-        const ds = dsOf(x.date);
-        const futuro = x.date > hoje;
-        const previsto = p52IsPlanned(atv, x.date);
-        // linha Planejado
-        if(previsto){
-          const vp = M.valor(slot.rowPlan, x.col);
-          if(vp==null || vp===''){ escreverCelula(M, slot.rowPlan, x.col, 'P', null); cont.P++; }
-        }
-        // linha Status
-        const reg = status[ds] && status[ds][atv.id];
-        let cod = null;
-        if(reg && CODIGOS.includes(reg.status)) cod = reg.status;
-        else if(!futuro && (feitos[ds]||[]).some(l=>atvCasaComLocal(atv, l))) cod = 'E';
-        const vs = M.valor(slot.rowStatus, x.col);
-        const temModelo = vs!=null && vs!=='';
-        if(!cod){
-          if(futuro) continue;
-          if(temModelo){ preservadas++; continue; }          // histórico lançado no próprio Excel
-          cod = previsto ? 'PE' : 'NP';
-        } else if(temModelo && String(vs).trim()!==cod) substituidas++;
-        if(temModelo && String(vs).trim()===cod) continue;
-        escreverCelula(M, slot.rowStatus, x.col, cod, estStatus);
-        cont[cod] = (cont[cod]||0)+1;
-      }
+    progresso('Montando o cabeçalho e o calendário…');
+    const EST = await abrirEstilos(M);
+    const rotulos = new Map();
+    for(let m=0;m<12;m++){ const c = m===0 ? A.blocos[0][0] : colDoDia.get(dsOf(new Date(ano,m,1))); if(c) rotulos.set(c, P52_MESES[m].toUpperCase()); }
+    const cab = [];
+    for(let r=1; r<A.primeira; r++){
+      const p = A.idx.get(r); if(!p) continue;
+      const bruto = A.body.slice(p[0], p[1]);
+      if(r!==A.rMes && r!==A.hdr.row && r!==A.rDia){ cab.push(bruto); continue; }
+      const lin = parseLinha(bruto);
+      cab.push(linhaXml(r, lin.attrs, lin.cels.map(c=>{
+        const s = attr(c.attrs,'s');
+        if(c.col < firstDayCol) return '<c r="'+refCol(c.col)+r+'"'+c.attrs+(c.inner ? '>'+c.inner+'</c>' : '/>');
+        const d = colData.get(c.col);
+        if(r===A.rMes) return celXml(c.col, r, s, rotulos.get(c.col) || null);
+        if(r===A.hdr.row) return celXml(c.col, r, s, d ? LETRAS_DIA[d.getDay()] : null);
+        return celXml(c.col, r, s, d ? d.getDate() : null);
+      })));
     }
 
+    progresso('Gerando as linhas de áreas e atividades…');
+    const mk = lin => { const est = new Map(); lin.cels.forEach(c=>est.set(c.col, attr(c.attrs,'s')));
+                        const cols = [...new Set([...lin.cels.map(c=>c.col).filter(c=>c<=lastCol), ...usedCols])].sort((x,y)=>x-y);
+                        return {attrs:lin.attrs, est, cols}; };
+    const TM = {}; Object.keys(A.T).forEach(k=>TM[k] = mk(A.T[k]));
+    const defDia = tm => { for(const c of usedCols){ if(tm.est.has(c)) return tm.est.get(c); } return null; };
+    const defPlano = defDia(TM.meioPlano), defStatus = defDia(TM.meioStatus);
+
+    const corpo = [], mesclas = [], cont = {P:0, E:0, PE:0, NR:0, R:0, NP:0, outros:0};
+    const areasOrdem = [...new Set(filtradas.map(a=>a.area))];       // mesma ordem da tela
+    let r = A.primeira;
+    for(const area of areasOrdem){
+      const lista = filtradas.filter(a=>a.area===area), n = lista.length;
+      mesclas.push(refCol(A.hdr.colArea)+r+':'+refCol(A.hdr.colArea)+(r+2*n-1));
+      lista.forEach((a,k)=>{
+        const pos = n===1 ? 'uni' : (k===0 ? 'pri' : (k===n-1 ? 'ult' : 'meio'));
+        const tp = TM[pos==='uni' || pos==='pri' ? 'priPlano' : pos==='ult' ? 'ultPlano' : 'meioPlano'];
+        const ts = TM[pos==='uni' || pos==='ult' ? 'ultStatus' : pos==='pri' ? 'priStatus' : 'meioStatus'];
+        const est = usedCols.map(c=>estadoDaCelula(a, colData.get(c), hoje, statusDia, chkDia, inicioReg));
+        const t1 = String(a.turno||'').includes('1T') ? 1 : 0, t2 = String(a.turno||'').includes('2T') ? 1 : 0;
+        // linha PLANEJADO
+        corpo.push(linhaXml(r, tp.attrs, tp.cols.map(col=>{
+          const dc = colData.has(col); const s = tp.est.has(col) ? tp.est.get(col) : (dc ? defPlano : null);
+          let v = null;
+          if(col===A.hdr.colArea) v = k===0 ? area : null;
+          else if(col===A.cAtv) v = a.atividade; else if(col===A.cFreq) v = a.freq;
+          else if(col===A.cTurno) v = '1T'; else if(col===A.cTurno+1) v = '2T';
+          else if(dc){ const e = est[usedCols.indexOf(col)]; if(e.prev){ v = 'P'; cont.P++; } }
+          return celXml(col, r, s, v);
+        })));
+        // linha STATUS
+        corpo.push(linhaXml(r+1, ts.attrs, ts.cols.map(col=>{
+          const dc = colData.has(col); let s = ts.est.has(col) ? ts.est.get(col) : (dc ? defStatus : null);
+          let v = null;
+          if(col===A.cTurno) v = t1; else if(col===A.cTurno+1) v = t2;
+          else if(dc){ const cod = est[usedCols.indexOf(col)].cod;
+            s = EST.derivar(s==null ? '0' : s, cod && COR_STATUS[cod] ? COR_STATUS[cod] : null);
+            if(cod){ v = cod; if(cont[cod]!=null) cont[cod]++; else cont.outros++; } }
+          return celXml(col, r+1, s, v);
+        })));
+        COLS_MESCLA_ATV.forEach(c=>mesclas.push(refCol(c)+r+':'+refCol(c)+(r+1)));
+        r += 2;
+      });
+    }
+    const ultAtv = r-1;
+
+    // ── áreas do Plano de Limpeza ainda sem atividades + legenda complementar (mesma informação do rodapé da tela) ──
+    const vazias = (opts.area || opts.turno || opts.freq) ? [] : (p52AreasSemAtividade || []).slice();
+    const padCols = A.pad ? A.pad.cels.filter(c=>c.col<=lastCol) : [];
+    const estPad = new Map(padCols.map(c=>[c.col, attr(c.attrs,'s')]));
+    const attrsPad = A.pad ? A.pad.attrs : '';
+    const sTexto = EST.derivar(estPad.get(A.cAtv) || '0', null, 'left');
+    const linhaPad = rr => { corpo.push(linhaXml(rr, attrsPad, padCols.map(c=>celXml(c.col, rr, estPad.get(c.col), null)))); };
+    const linhaTxt = (rr, txt) => { corpo.push(linhaXml(rr, attrsPad, padCols.map(c=>celXml(c.col, rr, c.col===A.cAtv ? sTexto : estPad.get(c.col), c.col===A.cAtv ? txt : null)))); };
+    linhaPad(r++);
+    linhaTxt(r++, 'Códigos: P = Planejado (1ª linha de cada atividade) · NR = prazo encerrado sem execução (mesmo critério do cadeado) · NP = não planejado · vazio = data futura. Cores: E, NR e NP seguem a legenda do cabeçalho; PE (âmbar) e R (roxo) o modelo nomeia mas não colore — seguem a tela do Plano 52.');
+    if(vazias.length){
+      linhaPad(r++);
+      linhaTxt(r++, 'Áreas do Plano de Limpeza ainda sem atividades cadastradas ('+vazias.length+'):');
+      vazias.forEach(nm=>linhaTxt(r++, '• '+nm));
+    }
+    for(let i=0;i<LINHAS_FINAIS;i++) linhaPad(r++);
+    const lastRow = r-1;
+
     progresso('Aplicando a formatação do modelo…');
-    const fmt = await ajustarFormatacao(M, mapa, cont.NP>0);
+    const mCab = A.merges.filter(m=>m.r1<A.primeira && m.c2<=lastCol).map(m=>refCol(m.c1)+m.r1+':'+refCol(m.c2)+m.r2);
+    const todasMesclas = mCab.concat(mesclas);
+    const headNovo = A.head.replace(/<dimension ref="[^"]*"\/>/, '<dimension ref="A1:'+refCol(lastCol)+lastRow+'"/>');
+    const mergeXml = '<mergeCells count="'+todasMesclas.length+'">'+todasMesclas.map(x=>'<mergeCell ref="'+x+'"/>').join('')+'</mergeCells>';
+    const tailNovo = /<mergeCells[^>]*>[\s\S]*?<\/mergeCells>/.test(A.tail) ? A.tail.replace(/<mergeCells[^>]*>[\s\S]*?<\/mergeCells>/, mergeXml) : mergeXml+A.tail;
+    const xml = headNovo+'<sheetData>'+cab.join('')+corpo.join('')+'</sheetData>'+tailNovo;
 
     progresso('Validando…');
-    const xml = serializar(M.doc);
-    const val = {
-      calendarioOk: mapa.errosCalendario===0,
-      merges: {antes: mergesAntes, depois: (xml.match(/<mergeCell /g)||[]).length},
-      celulas: {antes: celulasAntes, depois: (xml.match(/<c /g)||[]).length},
-    };
     const problemas = [];
-    if(!val.calendarioOk) problemas.push('As datas do modelo não formam um calendário contínuo ('+mapa.errosCalendario+' divergência(s)).');
-    if(val.merges.antes!==val.merges.depois) problemas.push('Quantidade de células mescladas mudou.');
-    if(val.celulas.depois < val.celulas.antes) problemas.push('Células do modelo foram perdidas.');
+    if(!/<sheetViews>[\s\S]*?<pane [^>]*state="frozen"/.test(xml) && /state="frozen"/.test(M.xml)) problemas.push('Painéis congelados do modelo foram perdidos.');
+    if((xml.match(/<mergeCell /g)||[]).length !== todasMesclas.length) problemas.push('Contagem de mesclagens inconsistente.');
     if(problemas.length) throw new Error('Validação falhou: '+problemas.join(' '));
-
     M.zip.file(M.caminho, xml, {createFolders:false});
+    EST.salvar();
     const blob = await M.zip.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:6},
       mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 
     return {
-      blob, nome: 'Plano_52_Semanas_'+SITE+'_'+mapa.ano+'.xlsx',
+      blob, nome: 'Plano_52_Semanas_'+SITE+'_'+ano+'.xlsx', areasSemAtividade: vazias,
       resumo: {
-        ano: mapa.ano, semanas: mapa.semanas.length, dias: mapa.cols.length,
-        periodo: brOf(mapa.cols[0].date)+' a '+brOf(mapa.cols[mapa.cols.length-1].date),
-        atividadesModelo: mapa.slots.length, atividadesSistema: filtradas.length, vinculadas: vinc.length,
-        cont, preservadas, substituidas, idsDuplicados, fmt, val, origem, modeloSalvo,
+        ano, semanas: semanas.length, dias: dias.length, periodo: brOf(dias[0])+' a '+brOf(dias[dias.length-1]),
+        areas: areasOrdem.length, atividades: filtradas.length, linhasAtividade: ultAtv-A.primeira+1,
+        cont, estilosNovos: EST.novos(), mesclas: {modelo: A.merges.length, gerado: todasMesclas.length},
+        modeloSemanas: A.blocos.length, origem, modeloSalvo,
       },
-      naoVinc, semSistema,
     };
   }
+  window.p52GerarExcel = gerar;   // uso programático / testes (mesma função do botão)
 
   /* ------------------------------------------------------------------
      Interface
@@ -8684,11 +9141,11 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
     ov.innerHTML = `
       <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;">
         <div style="font-size:16px;font-weight:700;margin-bottom:4px;">📥 Exportar Excel 52 Semanas</div>
-        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:16px;">Gera uma cópia do Excel modelo com todas as semanas preenchidas pelos dados reais do sistema.</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:16px;">O modelo define só o visual; áreas, atividades, execução e pendências vêm do sistema, exatamente como na tela do Plano 52.</div>
         <div id="p52ExpForm">
           <label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-bottom:14px;">
-            <input type="checkbox" checked disabled style="width:16px;height:16px;"> <b>Plano completo — todas as 52 semanas</b></label>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Opcional — escolher quais atividades preencher (o calendário continua completo):</div>
+            <input type="checkbox" checked disabled style="width:16px;height:16px;"> <b>Plano completo — todas as semanas do ano</b></label>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Opcional — limitar as áreas/atividades exportadas (o calendário continua completo):</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
             <div><label class="lbl-base">ÁREA</label>${sel('p52ExpArea','Todas as áreas',areas,p52Filters.area)}</div>
             <div><label class="lbl-base">TURNO</label>${sel('p52ExpTurno','Todos os turnos',['1T','2T'],p52Filters.turno)}</div>
@@ -8735,26 +9192,16 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
         const R = await gerar(opts, prog);
         const url = URL.createObjectURL(R.blob);
         const s = R.resumo;
-        const pend = R.naoVinc.length;
         out.innerHTML = `
           <div style="font-size:15px;font-weight:700;color:var(--ok);margin-bottom:10px;">✅ Plano de 52 Semanas gerado com sucesso.</div>
           <div style="font-size:12.5px;line-height:1.7;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;">
-            📅 ${s.semanas} semanas processadas · ${s.dias} dias (${esc(s.periodo)})<br>
-            🧹 ${s.vinculadas} de ${s.atividadesSistema} atividade(s) do sistema vinculada(s) · ${s.atividadesModelo} atividades no modelo<br>
+            📅 ${s.semanas} semanas · ${s.dias} dias (${esc(s.periodo)})<br>
+            🧹 ${s.areas} áreas · ${s.atividades} atividades — as mesmas do Plano 52 (fonte única: Plano de Limpeza)<br>
             ✍️ Preenchidos: P ${s.cont.P} · E ${s.cont.E} · PE ${s.cont.PE} · NR ${s.cont.NR} · R ${s.cont.R} · NP ${s.cont.NP}<br>
-            📌 ${s.preservadas} célula(s) do histórico do modelo mantida(s) · ${s.substituidas} atualizada(s) pelo sistema<br>
-            ✔️ Calendário conferido · mesclagens ${s.val.merges.depois}/${s.val.merges.antes} · layout do modelo preservado<br>
+            📋 ${R.areasSemAtividade.length} área(s) do Plano de Limpeza ainda sem atividades, listadas ao final da planilha<br>
+            ✔️ Layout do modelo preservado (cabeçalho, painéis, larguras, ${s.mesclas.gerado} mesclagens) · dados antigos do modelo não utilizados<br>
             📄 Modelo usado: ${esc(s.origem)}${s.modeloSalvo ? ' · <b style="color:var(--ok);">salvo como modelo oficial</b>' : ''}
-            ${s.idsDuplicados ? `<br><span style="color:var(--amber);">⚠ ${s.idsDuplicados} atividade(s) com o mesmo identificador no sistema (mesmo nome repetido na mesma área) receberam o mesmo status.</span>` : ''}
           </div>
-          ${pend ? `<div style="background:rgba(227,179,65,.1);border:1px solid rgba(227,179,65,.4);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
-              ⚠️ <b>Alguns registros não puderam ser vinculados ao modelo.</b> (${pend})
-              <a href="#" id="p52ExpVerPend" style="color:var(--teal-bright);margin-left:6px;">ver pendências</a>
-              <div id="p52ExpPend" style="display:none;margin-top:8px;max-height:220px;overflow:auto;">
-                <table class="report-table"><thead><tr><th>Área</th><th>Atividade</th><th>Freq.</th><th>Motivo</th></tr></thead><tbody>
-                ${R.naoVinc.map(p=>`<tr><td>${esc(p.area)}</td><td>${esc(p.atividade)}</td><td>${esc(p.freq)}</td><td style="font-size:11.5px;">${esc(p.motivo)}</td></tr>`).join('')}
-                </tbody></table></div></div>` : ''}
-          ${R.semSistema.length ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">${R.semSistema.length} atividade(s) do modelo sem correspondente no sistema foram mantidas como estão no modelo.</div>` : ''}
           <div style="display:flex;gap:10px;">
             <a class="btn" href="${url}" download="${esc(R.nome)}" style="flex:1;text-align:center;text-decoration:none;">⬇️ Baixar Excel</a>
             <button class="btn secondary" id="p52ExpFim" style="flex:1;">Fechar</button>
