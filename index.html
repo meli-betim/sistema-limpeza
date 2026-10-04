@@ -1304,6 +1304,9 @@ function updateHeaderTurnSelectorUI(){
 }
 
 async function renderChecklist(){
+  // Esta função SEMPRE substitui a tela pelo Plano de Limpeza; portanto a variável que diz qual tela
+  // está ativa precisa refletir isso (o seletor T1/T2 e as atualizações automáticas dependem dela).
+  section = 'checklist';
   wireHeaderTurnSelector();
   if(mode==='day') await renderDay(); else await renderWeek();
 }
@@ -4177,6 +4180,7 @@ async function ensureUserLogin(){
           isAdmin=(found.perfil==='admin');
           isSupervisor=(found.perfil==='supervisor');
           if(isAdmin) showAdminBadge();
+          section = 'checklist';   // a tela exibida a seguir é o Plano de Limpeza
           renderTopControls();
           await renderChecklist();
           updateNavAdminVisibility();
@@ -4246,6 +4250,7 @@ async function renderUserLogin(noUsers){
         await window.storage.set('userSession', JSON.stringify({...found, ts:Date.now()}), false);
         await saveEmployee(found.nome);
         if(isAdmin) showAdminBadge();
+        section = 'checklist';   // a tela exibida a seguir é o Plano de Limpeza
         renderTopControls();
         await renderChecklist();
         updateNavAdminVisibility();
