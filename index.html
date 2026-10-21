@@ -7620,6 +7620,23 @@ setTimeout(()=>{
   const pushIdMin = ts => pushPrefixo(ts) + '------------';
   const pushIdMax = ts => pushPrefixo(ts) + 'zzzzzzzzzzzz';
   let _desenhoTok = 0, _cargaTok = 0, _lookbackPendente = null;
+  const PAGINA = 100;                                   // desktop: o Histórico abre com as 100 mais recentes (+ "Carregar mais")
+  let _pagCursor = null, _pagMais = false, _pagCtx = null;
+  const _lista = snap => { const l = []; if(snap && snap.exists()) snap.forEach(ch=>{ l.push(Object.assign({id: ch.key}, ch.val())); }); return l; };
+  async function carregarMais(){
+    if(!_pagCtx || !_pagMais) return;
+    const c = _pagCtx, ref = fbRoot.child(AUDIT_PATH), btn = document.getElementById('audMais');
+    if(btn){ btn.disabled = true; btn.textContent = 'Carregando…'; }
+    try{
+      const r2 = await withTimeout(ref.orderByKey().startAt(pushIdMin(c.ini - 36*3600000)).endAt(_pagCursor).limitToLast(PAGINA + 1).get(), 20000);
+      if(c.tok !== _cargaTok) return;
+      const bruto = _lista(r2), novos = bruto.filter(x=>x.id !== _pagCursor);
+      _pagCursor = bruto.length ? bruto[0].id : _pagCursor; _pagMais = novos.length >= PAGINA;
+      const ids = new Set(logs.map(x=>x.id));
+      const ok = novos.filter(x=>{ const t = tsDe(x); return t>=c.ini && t<=c.fim && !ids.has(x.id); });
+      logs = logs.concat(ok).sort((a,b)=>tsDe(b)-tsDe(a)); preencherOpcoes(); desenhar();
+    }catch(e){ console.error('[Auditoria] Falha ao carregar mais', e); if(btn){ btn.disabled = false; btn.textContent = 'Tentar de novo'; } }
+  }
   async function carregar(){
     const out = document.getElementById('audResultado');
     if(!out) return;
@@ -7634,13 +7651,15 @@ setTimeout(()=>{
     let lista, erroFinal = null;
     if(window.__dsDesk) try{
       // 0) janela por chave (rápida, sem índice). Folga de 7 dias antes: registros gravados offline e sincronizados depois.
-      // 1ª etapa (rápida): período + 36 h de folga. 2ª etapa (em segundo plano): o restante da folga de 7 dias, para registros
-      // gravados offline e sincronizados com atraso — se aparecer algo, a tabela é completada.
-      const tokC = ++_cargaTok, FOLGA1 = 36*3600000, FOLGA2 = 7*86400000; _lookbackPendente = null;
-      lista = paraLista(await withTimeout(ref.orderByKey().startAt(pushIdMin(ini - FOLGA1)).endAt(pushIdMax(fim + 3600000)).get(), 20000))
-        .filter(r=>{ const t = tsDe(r); return t>=ini && t<=fim; });
-      _lookbackPendente = () => {
-        ref.orderByKey().startAt(pushIdMin(ini - FOLGA2)).endAt(pushIdMin(ini - FOLGA1)).get().then(sn=>{
+      // Desktop: só as PAGINA mais recentes do período (a chave do push() é cronológica → sem índice e sem baixar o período inteiro).
+      // Folga de 36 h antes do início (+ 2ª etapa em segundo plano até 72 h): registros gravados offline e sincronizados depois. O filtro exato por 'ts' vem em seguida.
+      const tokC = ++_cargaTok; _lookbackPendente = null; _pagCursor = null; _pagMais = false;
+      const r1 = await withTimeout(ref.orderByKey().startAt(pushIdMin(ini - 36*3600000)).endAt(pushIdMax(fim + 3600000)).limitToLast(PAGINA).get(), 20000);
+      const bruto = paraLista(r1);
+      _pagCursor = bruto.length ? bruto[0].id : null; _pagMais = bruto.length >= PAGINA; _pagCtx = {ini, fim, tok: tokC};
+      lista = bruto.filter(r=>{ const t = tsDe(r); return t>=ini && t<=fim; });
+      _lookbackPendente = () => {   // 2ª etapa, em segundo plano: restante da folga (até 72 h antes do início) p/ registros gravados offline e sincronizados depois
+        ref.orderByKey().startAt(pushIdMin(ini - 72*3600000)).endAt(pushIdMin(ini - 36*3600000)).get().then(sn=>{
           if(tokC !== _cargaTok) return;
           const ids = new Set(logs.map(x=>x.id));
           const novos = paraLista(sn).filter(r=>{ const t = tsDe(r); return t>=ini && t<=fim && !ids.has(r.id); });
@@ -7706,7 +7725,8 @@ setTimeout(()=>{
     });
 
     if(!rows.length){
-      out.innerHTML = '<div class="empty-state">Nenhum registro no período e filtros selecionados.</div>';
+      out.innerHTML = '<div class="empty-state">Nenhum registro no período e filtros selecionados.' + (_pagMais ? '<div style="margin-top:10px"><button class="btn small secondary" id="audMais">Carregar mais registros</button></div>' : '') + '</div>';
+      { const bm = out.querySelector('#audMais'); if(bm) bm.onclick = carregarMais; }
       return;
     }
     const LIMITE = 1000;
@@ -7734,9 +7754,11 @@ setTimeout(()=>{
         <thead><tr><th>Data</th><th>Horário</th><th>Usuário</th><th>Turno</th><th>Área</th><th>Item</th><th>Ação</th></tr></thead>
         <tbody>${vis.slice(0, PRIMEIRAS).map(linha).join('')}</tbody>
       </table></div>
-      <div style="font-size:12px;color:var(--text-dim);margin-top:8px;">
-        ${rows.length} registro(s)${rows.length>LIMITE?` · exibindo os ${LIMITE} mais recentes (reduza o período para ver os demais)`:''}
+      <div style="font-size:12px;color:var(--text-dim);margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span>${rows.length} registro(s)${_pagMais ? ' carregado(s) · há registros mais antigos neste período' : ''}${rows.length>LIMITE?` · exibindo os ${LIMITE} mais recentes (reduza o período para ver os demais)`:''}</span>
+        ${(_pagMais && rows.length < LIMITE) ? '<button class="btn small secondary" id="audMais">Carregar mais</button>' : ''}
       </div>`;
+    { const bm = out.querySelector('#audMais'); if(bm) bm.onclick = carregarMais; }
     if(vis.length > PRIMEIRAS){
       const tb = out.querySelector('tbody'), tok = ++_desenhoTok; let k = PRIMEIRAS;
       const lote = ()=>{ if(tok !== _desenhoTok || !tb || !tb.isConnected) return; tb.insertAdjacentHTML('beforeend', vis.slice(k, k+150).map(linha).join('')); k += 150; if(k < vis.length) requestAnimationFrame(lote); };
@@ -11112,7 +11134,7 @@ body.ds-periodo .topbar .controls > div[style*="column"], body.ds-periodo #homeP
     const p = periodoAtual(), h = hojeD();
     Object.keys(est).forEach(k=>delete est[k]);
     Object.assign(est, {tok, p, filtro:window.__dsFiltro||'ALL', escala:window.__dsEscala||'sem', ordem:window.__dsOrdem||'pior', consol:window.__dsConsol||'ano', pend:{cur:1, ref:1, tend:1, sol:1, ano:1}, falha:[], mapa:new Map()});
-    const vivo = () => tok === _inicioTok;
+    const vivo = () => tok === _inicioTok && section === 'home';          // saiu do Início → a carga em segundo plano para de pintar
     const pintar = () => { if(vivo()){ desenhar(); try{ window.dsPeriodoHeader(); }catch(e){} } };
     pintar();
     const seguro = async (n, fn) => { try{ return await fn(); }catch(e){ console.error('[Painel] '+n, e); est.falha.push(n); return null; } };
@@ -11162,14 +11184,14 @@ body.ds-periodo .topbar .controls > div[style*="column"], body.ds-periodo #homeP
     const tok = est.tok, p = est.p; if(est.mesesGraf) return;
     const base = p.t==='hist' ? mesesDisp().reverse() : mesesDoPeriodo({t:'ano', a:p.a});
     const out = []; est.mesesGraf = []; est.carregandoMesesGraf = true; desenhar();
-    for(const x of base){ try{ const r = est.mapa.get(ymKey(x.a,x.m)) || await mesAgg(x.a, x.m, est.reg); if(tok!==est.tok) return; out.push(r); est.mesesGraf = out.slice(); desenhar(); }catch(e){ console.error(e); } }
+    for(const x of base){ try{ const r = est.mapa.get(ymKey(x.a,x.m)) || await mesAgg(x.a, x.m, est.reg); if(tok!==est.tok || section!=='home') return; out.push(r); est.mesesGraf = out.slice(); desenhar(); }catch(e){ console.error(e); } }
     est.carregandoMesesGraf = false; desenhar();
   }
   function ir(dest){ inicioIr(dest); }
   const abrirRelatorio = () => { reportSection = 'checklist'; reportPeriod = 'month'; reportDate = ultDiaPeriodo(); document.getElementById('navReport').click(); };
 
   function desenhar(){
-    const app = document.getElementById('app'); if(!app || est.tok!==_inicioTok) return;
+    const app = document.getElementById('app'); if(!app || est.tok!==_inicioTok || section!=='home') return;   // nunca desenha por cima de outra aba
     const p = est.p, pend = est.pend, dp = dadosPeriodo(), s = dp.s;
     const nome = String((currentUser && currentUser.nome) || currentEmployee || '').trim().split(/\s+/)[0] || '';
     const meu = descPeriodo(p, window.__dsAte), ehMes = p.t==='mes';
