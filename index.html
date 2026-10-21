@@ -825,7 +825,7 @@ let mode = 'day';
 // ═══════════════════════════════════════════════════════════════
 
 function actualDateTimeBRT(){
-  return new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'}));
+  return new Date(dsNowBrtMs());
 }
 
 function getOperationalDate(){
@@ -1055,7 +1055,7 @@ function isOverdue(loc, turnKey, idx, date, state){
   if((dayPar && colParity!=='par') || (!dayPar && colParity!=='impar')) return false;
   const deadline = occDeadline(loc, turnKey, idx, date);
   if(!deadline) return false;
-  const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  const nowMs = dsNowBrtMs();
   return nowMs > deadline.getTime();
 }
 
@@ -1066,7 +1066,7 @@ function isBlockedLate(loc, turnKey, idx, date, state){
   if(isAdmin) return false;
   const deadline = occDeadline(loc, turnKey, idx, date);
   if(!deadline) return false;
-  const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  const nowMs = dsNowBrtMs();
   const dl = deadline.getTime();
   const tol = blockTolerance(loc, turnKey, idx, date);
   const tooLate = nowMs > dl + tol;
@@ -1084,12 +1084,21 @@ function isNonBathroomBlocked(turnKey, date, state){ return false; } // não usa
 // T1D/T2D = Par, T1N/T2N = Ímpar
 // Dentro do turno: T*D (diurno) = 06:00-18:00 | T*N (noturno) = 18:00-06:00
 // Retorna a hora BRT atual como objeto Date
-function nowBRT(){ return new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})); }
+function nowBRT(){ return new Date(dsNowBrtMs()); }
+/* Hora de Brasília em ms. No desktop é calculada uma vez por segundo (a conversão por toLocaleString era refeita milhares de vezes por tela);
+   no celular continua exatamente como antes. */
+function dsNowBrtMs(){
+  const conv = t => new Date(new Date(t).toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  if(!window.__dsDesk) return conv(Date.now());
+  const t = Date.now(), T = window.__dsNowT || 0;
+  if(!T || t - T > 1000 || t < T){ window.__dsNowB = conv(t); window.__dsNowT = t; return window.__dsNowB; }
+  return window.__dsNowB + (t - T);
+}
 
 function isTurnBlocked(turnKey){
   if(isAdmin) return false;
   // Usa fuso de Brasília (UTC-3) para garantir horário correto independente do dispositivo
-  const nowBRT = new Date(new Date().toLocaleString('en-US', {timeZone:'America/Sao_Paulo'}));
+  const nowBRT = new Date(dsNowBrtMs());
   const h = nowBRT.getHours();
   const isDiurnoAgora = h >= 7 && h < 19;
   // D = diurno (06-18h), N = noturno (18-06h)
@@ -2309,7 +2318,7 @@ function reqCardHtml(r, showActions){
       <button class="btn small secondary" data-action="delete" style="color:var(--bad);border-color:var(--bad);">Excluir</button>
     </div>` : '';
 
-  const fotoHtml = r.foto ? `<img loading="lazy" src="${r.foto}" class="req-photo-thumb" alt="Foto da solicitação" title="Foto da solicitação (clique para ampliar)">` : '';
+  const fotoHtml = r.foto ? `<img loading="lazy"${window.__dsDesk?' decoding="async"':''} src="${r.foto}" class="req-photo-thumb" alt="Foto da solicitação" title="Foto da solicitação (clique para ampliar)">` : '';
   const tipoHtml = r.tipo ? `<span class="badge" style="background:rgba(63,214,201,.12);color:var(--teal-bright);margin-right:4px;">📋 ${r.tipo}</span>` : '';
 
   // Alerta: aberto há mais de 1h e ainda pendente/andamento
@@ -2327,7 +2336,7 @@ function reqCardHtml(r, showActions){
   const evidenciaHtml = r.evidencia ? `
     <div style="margin-top:10px;">
       <div style="font-size:11px;color:var(--ok);font-weight:700;margin-bottom:4px;">📷 Evidência de conclusão</div>
-      <img loading="lazy" src="${r.evidencia}" class="req-photo-thumb" alt="Evidência de conclusão" title="Evidência de conclusão (clique para ampliar)" style="border-color:var(--ok);">
+      <img loading="lazy"${window.__dsDesk?' decoding="async"':''} src="${r.evidencia}" class="req-photo-thumb" alt="Evidência de conclusão" title="Evidência de conclusão (clique para ampliar)" style="border-color:var(--ok);">
     </div>` : '';
 
   return `<div class="req-card" data-id="${r.id}">
@@ -3276,9 +3285,9 @@ async function renderReportChecklist(){
     if(st==='done'){
       return entry.ts <= dlMs ? 'ontime' : 'late';
     } else {
-      const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+      const nowMs = dsNowBrtMs();
       // Só considera não-exec se for hoje e janela fechou; para datas passadas sempre não-exec
-      const today = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'}));
+      const today = new Date(dsNowBrtMs());
       const isToday = date.getDate()===today.getDate()&&date.getMonth()===today.getMonth()&&date.getFullYear()===today.getFullYear();
       if(isToday){
         return nowMs > dlMs+tol ? 'notdone' : 'pending';
@@ -4721,12 +4730,25 @@ function kSwitchTab(tab){
 
 /* ===================== EFETIVO ===================== */
 const CARGOS_EFETIVO = ['Operador de máquina','Descarte / Resíduos','Serviços Gerais','Encarregado','Supervisor','ASG de Refeitório'];
-const TURNO_LABELS = {T1D:'T1 Par (Diurno)', T1N:'T2 Par (Noturno)', T2D:'T1 Ímpar (Diurno)', T2N:'T2 Ímpar (Noturno)'};
-const TURNO_PREVISTO = {T1D:11, T1N:10, T2D:11, T2N:10};
+/* Valores ORIGINAIS que estavam fixos no código. Servem só como BASE da migração (vigência "desde o início")
+   e como reserva se o cadastro ainda não puder ser lido. O dimensionamento real agora é o cadastro
+   "📐 Dimensionamento de Efetivo" (window.efDim) — nunca altere números aqui. */
+const TURNO_LABELS_PADRAO = {T1D:'T1 Par (Diurno)', T1N:'T2 Par (Noturno)', T2D:'T1 Ímpar (Diurno)', T2N:'T2 Ímpar (Noturno)'};
+const TURNO_PREVISTO_PADRAO = {T1D:11, T1N:10, T2D:11, T2N:10};
+/* Nome atual do turno (cadastro) — mantém a sintaxe TURNO_LABELS[chave] usada em toda a tela. */
+const TURNO_LABELS = new Proxy({}, {get:(_,k)=> typeof k==='string' ? ((window.efDim && window.efDim.nome(k)) || TURNO_LABELS_PADRAO[k]) : undefined});
+/* Reserva: previsto vigente HOJE. Os cálculos usam efPrevistoReg(registro, turno, data) — por data. */
+const TURNO_PREVISTO = new Proxy({}, {get:(_,k)=> typeof k==='string' ? (window.efDim ? window.efDim.previsto(k, window.efDim.hoje()) : (TURNO_PREVISTO_PADRAO[k]||0)) : undefined});
+/* Previsto de um turno numa data: usa a cópia guardada no lançamento (_previsto); sem ela, a vigência da data. */
+function efPrevistoReg(reg, tk, ds){
+  if(reg && reg._previsto && reg._previsto[tk]!=null) return reg._previsto[tk];
+  return window.efDim ? window.efDim.previsto(tk, ds) : (TURNO_PREVISTO_PADRAO[tk]||0);
+}
+const efGrupoPar = k => window.efDim ? window.efDim.grupoPar(k) : ((k==='T1D'||k==='T1N') ? 'T1' : 'T2');
 let efAbaAtiva = 'dia';
 
 async function loadEfetivo(ds){ try{ const s=await window.storage.get('efetivo:'+ds,true); return s?JSON.parse(s.value):{}; }catch(e){ return {}; } }
-async function saveEfetivo(ds,data){ try{ await window.storage.set('efetivo:'+ds,JSON.stringify(data),true); }catch(e){} }
+async function saveEfetivo(ds,data){ try{ if(window.efDim) window.efDim.snapshot(ds,data); await window.storage.set('efetivo:'+ds,JSON.stringify(data),true); }catch(e){} }
 async function loadColaboradores(){
   try{
     const s = await window.storage.get('efetivo:colaboradores', true);
@@ -4777,12 +4799,13 @@ async function loadColaboradores(){
   }catch(e){ return []; }
 }
 async function saveColaboradores(list){ try{ await window.storage.set('efetivo:colaboradores',JSON.stringify(list),true); }catch(e){} }
-function turnosEfetivoDia(date){ return activeTurns(date); }
+function turnosEfetivoDia(date){ return window.efDim ? window.efDim.turnosDoDia(date) : activeTurns(date); }
 
 async function renderEfetivo(){
   const app = document.getElementById('app');
   app.innerHTML = '<div class="loading">Carregando efetivo...</div>';
   const ds = dateStr(currentDate);
+  if(window.efDim) await window.efDim.aguardar();
   const turnosDia = turnosEfetivoDia(currentDate);
   const [data, colabs] = await Promise.all([loadEfetivo(ds), loadColaboradores()]);
   if(!data._turnos) data._turnos = turnosDia.map(t=>t.key);
@@ -4799,7 +4822,7 @@ async function renderEfetivo(){
 
   function turnoCard(t){
     const lista=data[t.key]||[]; const label=TURNO_LABELS[t.key]||t.label;
-    const previsto=TURNO_PREVISTO[t.key]||0; const realizado=lista.length;
+    const previsto=efPrevistoReg(data,t.key,ds); const realizado=lista.length;
     const diff=realizado-previsto; const ader=previsto>0?Math.round(realizado/previsto*100):null;
     const rows=lista.map((p,i)=>`<tr>
       <td style="padding:9px 12px;font-size:13px;">${i+1}</td>
@@ -4962,9 +4985,9 @@ async function renderEfetivo(){
     const rows=[];
     for(let i=0;i<14;i++){
       const d=days[i]; const ddata=results[i];
-      const turnos=ddata._turnos||activeTurns(d).map(t=>t.key);
+      const turnos=ddata._turnos||turnosEfetivoDia(d).map(t=>t.key);
       for(const tk of turnos){
-        const lista=ddata[tk]||[]; const previsto=TURNO_PREVISTO[tk]||0; const realizado=lista.length;
+        const lista=ddata[tk]||[]; const previsto=efPrevistoReg(ddata,tk,dateStr(d)); const realizado=lista.length;
         if(previsto===0&&realizado===0) continue;
         const diff=realizado-previsto; const ader=previsto>0?(realizado/previsto*100).toFixed(1)+'%':'—';
         rows.push(`<tr><td style="padding:9px 12px;white-space:nowrap;">${fmtBR(d)}</td>
@@ -4993,8 +5016,8 @@ async function renderEfetivo(){
     const results=await Promise.all(days.map(d=>loadEfetivo(dateStr(d))));
     let totalPrev=0,totalReal=0;
     for(let i=0;i<diasNoMes;i++){
-      const ddata=results[i]; const turnos=ddata._turnos||activeTurns(days[i]).map(t=>t.key);
-      for(const tk of turnos){ totalPrev+=TURNO_PREVISTO[tk]||0; totalReal+=(ddata[tk]||[]).length; }
+      const ddata=results[i]; const turnos=ddata._turnos||turnosEfetivoDia(days[i]).map(t=>t.key);
+      for(const tk of turnos){ totalPrev+=efPrevistoReg(ddata,tk,dateStr(days[i])); totalReal+=(ddata[tk]||[]).length; }
     }
     const deficit=totalReal-totalPrev; const ader=totalPrev>0?(totalReal/totalPrev*100).toFixed(1):null;
     return {totalPrev,totalReal,deficit,ader};
@@ -5026,10 +5049,10 @@ async function renderEfetivo(){
       // Isso garante que o TOTAL do mês bata exatamente com o que a tela
       // mostra em "Calcular" — a tela sempre conta o planejado do dia,
       // mesmo quando não houve lançamento algum naquele dia.
-      const turnos = ddata._turnos || activeTurns(d).map(t=>t.key);
+      const turnos = ddata._turnos || turnosEfetivoDia(d).map(t=>t.key);
 
       for(const tk of turnos){
-        const previsto = TURNO_PREVISTO[tk] || 0;
+        const previsto = efPrevistoReg(ddata, tk, dateStr(d));
         const lista = ddata[tk];
         // Mesma expressão exata usada em buildConsolidado(): (ddata[tk]||[]).length
         const praticado = (lista||[]).length;
@@ -5039,7 +5062,7 @@ async function renderEfetivo(){
         // nenhuma informação nova, só reaproveitando o que já existe.
         const nomes = (lista||[]).map(p=>p.nome).filter(Boolean);
 
-        const grupo = (tk==='T1D'||tk==='T1N') ? 'T1' : 'T2';
+        const grupo = efGrupoPar(tk);
         if(!porTurno[grupo]) porTurno[grupo] = {planejado:0, praticado:0};
 
         // Soma sempre o planejado (igual à tela) e o praticado real (0 se
@@ -5542,6 +5565,8 @@ async function p52SaveStatusDay(ds, data){
 // Escuta execuções do Plano de Limpeza em tempo real
 // IMPORTANTE: o Plano de Limpeza grava em 'checklist:{data}' (via window.storage),
 // não em 'dias/{data}'. O caminho real no Firebase é encodeKey('checklist:'+ds).
+let _p52RT = null;                      // junta várias atualizações seguidas numa única re-renderização
+function p52AgendarRender(){ clearTimeout(_p52RT); _p52RT = setTimeout(()=>{ if(section === 'p52sem') p52RenderWeek(); }, 250); }
 function p52StartFirebaseSync(){
   if(p52FirebaseListener) return;
   const days = p52GetWeekDates(p52WeekOffset);
@@ -5552,7 +5577,7 @@ function p52StartFirebaseSync(){
       let dayData;
       try{ dayData = JSON.parse(snap.val()); }catch(e){ return; }
       p52SyncDayFromChecklist(ds, dayData).then(()=>{
-        if(section === 'p52sem') { p52RenderWeek(); }
+        if(section === 'p52sem'){ if(window.__dsDesk){ if(window.dsInvalidarChecklist) window.dsInvalidarChecklist(ds); p52AgendarRender(); } else p52RenderWeek(); }
       });
     });
   });
@@ -5565,6 +5590,7 @@ async function p52SyncDayFromChecklist(ds, dayData){
   if(!dayData || !p52Atividades.length) return;
   const statusDay = await p52LoadStatusDay(ds);
   let changed = false;
+  const _memoLocal = new Map();         // atividades que casam com cada local (calculado uma vez por local)
 
   for(const [key, occData] of Object.entries(dayData)){
     if(!occData || occData.state !== 'done') continue;
@@ -5574,12 +5600,14 @@ async function p52SyncDayFromChecklist(ds, dayData){
     const executor = occData.emp || occData.who || '';
     const ts = occData.ts || '';
 
-    const matching = p52Atividades.filter(a => {
+    let matching = window.__dsDesk ? _memoLocal.get(locName) : null;
+    if(!matching) matching = p52Atividades.filter(a => {
       if(a.fonte === 'extra') return p52MatchLocal(a.area, locName);
       // Alias 1→N (ex: Auditório → Sala Ladicá, Sala Ladilá): casa se locName bater com QUALQUER uma das salas
       if(P52_ALIAS_MULTI[a.area]) return P52_ALIAS_MULTI[a.area].some(nome => p52MatchLocal(nome, locName));
       return p52MatchLocal(P52_ALIAS[a.area] || a.area, locName);
     });
+    _memoLocal.set(locName, matching);
 
     for(const atv of matching){
       const aid = atv.id;
@@ -5594,10 +5622,12 @@ async function p52SyncDayFromChecklist(ds, dayData){
   p52StatusCache[ds] = statusDay;
 }
 
+const _p52Norm = new Map();   // normalização memorizada (antes era refeita a cada comparação)
 function p52MatchLocal(a, b){
   if(!a||!b) return false;
-  const n = s => s.toLowerCase().trim().replace(/[^a-z0-9]/g,'');
-  return n(a) === n(b) || n(a).includes(n(b)) || n(b).includes(n(a));
+  const n = s => { if(!window.__dsDesk) return s.toLowerCase().trim().replace(/[^a-z0-9]/g,''); let v = _p52Norm.get(s); if(v === undefined){ v = s.toLowerCase().trim().replace(/[^a-z0-9]/g,''); _p52Norm.set(s, v); } return v; };
+  const x = n(a), y = n(b);
+  return x === y || x.includes(y) || y.includes(x);
 }
 
 // Consolidação diária às 00:00 (idempotente)
@@ -5997,7 +6027,7 @@ function plLimparCacheNR(){ _plNrCache.clear(); }
 function plExpirada(loc, turnKey, idx, date, state){
   if(state !== 'pending') return false;
   const dl = occDeadline(loc, turnKey, idx, date); if(!dl) return false;
-  const nowMs = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+  const nowMs = dsNowBrtMs();
   return nowMs > dl.getTime() + blockTolerance(loc, turnKey, idx, date);
 }
 /* Situação do LOCAL no dia segundo o Plano de Limpeza: 'E' (alguma limpeza feita) · 'NR' (nada feito e
@@ -6042,8 +6072,9 @@ async function plInicioRegistro(){
   }catch(e){
     const hoje = p52Today(), lista = [];
     for(let d=new Date(hoje.getFullYear(),0,1); d<=hoje; d.setDate(d.getDate()+1)) lista.push(dateStr(d));
-    for(let i=0; i<lista.length && !ini; i+=25){
-      const lote = lista.slice(i,i+25);
+    const _passo = window.__dsDesk ? 400 : 25;               // desktop: uma única rodada paralela; mobile: lotes de 25, como no original
+    for(let i=0; i<lista.length && !ini; i+=_passo){
+      const lote = lista.slice(i,i+_passo);
       const rs = await Promise.all(lote.map(ds=>window.storage.get('checklist:'+ds,false).catch(()=>null)));
       const j = rs.findIndex(r=>r && r.value); if(j>=0) ini = lote[j];
     }
@@ -6066,7 +6097,7 @@ const INICIO_TELA_PADRAO_DESKTOP = true;   // desktop abre em Início após o lo
 let _inicioTok = 0, _inicioSemanas = 8, _inicioCache = null;
 
 const inicioDia = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-const inicioAgoraMs = () => new Date(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getTime();
+const inicioAgoraMs = () => dsNowBrtMs();
 const inicioNum = (v,dec=0) => v.toLocaleString('pt-BR',{minimumFractionDigits:dec,maximumFractionDigits:dec});
 const inicioPct = (v,dec=0) => v==null ? '—' : inicioNum(v,dec)+'%';
 const inicioSinal = (v,dec=0) => (v>0?'+':(v<0?'−':''))+inicioNum(Math.abs(v),dec);
@@ -6125,7 +6156,7 @@ async function inicioEfetivo(ancora){
     const rs = await Promise.all(lista.map(d=>loadEfetivo(dateStr(d))));
     let prev = 0, falt = 0, dl = 0;
     lista.forEach((d,i)=>{ const dd = rs[i] || {}; let lanc = false;
-      (dd._turnos || activeTurns(d).map(t=>t.key)).forEach(tk=>{ if(Array.isArray(dd[tk])){ lanc = true; const p = TURNO_PREVISTO[tk]||0; prev += p; falt += Math.max(0, p-dd[tk].length); } });
+      (dd._turnos || turnosEfetivoDia(d).map(t=>t.key)).forEach(tk=>{ if(Array.isArray(dd[tk])){ lanc = true; const p = efPrevistoReg(dd, tk, dateStr(d)); prev += p; falt += Math.max(0, p-dd[tk].length); } });
       if(lanc) dl++; });
     return {prev, falt, dias:dl, pct: prev ? falt/prev*100 : null};
   }
@@ -6198,8 +6229,8 @@ function inicioAplicarBusca(nome, tentativas){
 }
 
 /* ── gráfico de linhas (SVG) ── */
-function inicioGrafico(serie){
-  const W=660, H=260, m={l:46,r:20,t:26,b:34}, iw=W-m.l-m.r, ih=H-m.t-m.b;
+function inicioGrafico(serie, Wp, Hp){   // Wp/Hp opcionais: só o painel desktop informa; sem argumentos = tamanho original (celular)
+  const W=Wp||660, H=Hp||260, m={l:46,r:20,t:26,b:34}, iw=W-m.l-m.r, ih=H-m.t-m.b;
   const x = i => m.l + (serie.length>1 ? i*iw/(serie.length-1) : iw/2), y = v => m.t + ih - (v/100)*ih;
   let g = '';
   [0,25,50,75,100].forEach(v=>{ g += `<line class="ini-g" x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}"/><text class="ini-ax" x="${m.l-8}" y="${y(v)+4}" text-anchor="end">${v}%</text>`; });
@@ -6228,6 +6259,8 @@ async function renderInicio(){
     const u = await (async()=>{ try{ const s = await window.storage.get('system:users', true); return s ? JSON.parse(s.value) : []; }catch(e){ return []; } })();
     if(u.length>0){ await renderUserLogin(); return; }
   }
+  // Desktop (≥769px): painel progressivo (ver bloco "REDESIGN DESKTOP"). Celular: segue o fluxo original abaixo, sem alteração.
+  if(window.dsDesktopAtivo && window.dsDesktopAtivo() && window.dsInicioProgressivo){ window.dsInicioProgressivo(tok); return; }
   app.innerHTML = '<div class="ini-wrap"><div class="loading">Carregando indicadores…</div></div>';
   const hoje = inicioDia(p52Today()), dia = inicioDia(currentDate), ancora = dia>hoje ? hoje : dia;
   const falha = []; const seguro = async (nome, fn) => { try{ return await fn(); }catch(e){ console.error('[Início] '+nome, e); falha.push(nome); return null; } };
@@ -7580,6 +7613,13 @@ setTimeout(()=>{
     filtros.acao    = document.getElementById('audAcao')?.value || '';
   }
 
+  /* IDs gerados por push() começam com o horário (8 caracteres em base 64) — então um intervalo de CHAVES devolve só o período,
+     sem precisar de índice nas regras. O filtro exato por 'ts' continua sendo aplicado depois, como antes. */
+  const PUSH_CHARS = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+  function pushPrefixo(ts){ let id = '', t = Math.max(0, Math.floor(ts)); for(let i=0;i<8;i++){ id = PUSH_CHARS.charAt(t%64) + id; t = Math.floor(t/64); } return id; }
+  const pushIdMin = ts => pushPrefixo(ts) + '------------';
+  const pushIdMax = ts => pushPrefixo(ts) + 'zzzzzzzzzzzz';
+  let _desenhoTok = 0, _cargaTok = 0, _lookbackPendente = null;
   async function carregar(){
     const out = document.getElementById('audResultado');
     if(!out) return;
@@ -7592,7 +7632,23 @@ setTimeout(()=>{
       return lista;
     };
     let lista, erroFinal = null;
-    try{
+    if(window.__dsDesk) try{
+      // 0) janela por chave (rápida, sem índice). Folga de 7 dias antes: registros gravados offline e sincronizados depois.
+      // 1ª etapa (rápida): período + 36 h de folga. 2ª etapa (em segundo plano): o restante da folga de 7 dias, para registros
+      // gravados offline e sincronizados com atraso — se aparecer algo, a tabela é completada.
+      const tokC = ++_cargaTok, FOLGA1 = 36*3600000, FOLGA2 = 7*86400000; _lookbackPendente = null;
+      lista = paraLista(await withTimeout(ref.orderByKey().startAt(pushIdMin(ini - FOLGA1)).endAt(pushIdMax(fim + 3600000)).get(), 20000))
+        .filter(r=>{ const t = tsDe(r); return t>=ini && t<=fim; });
+      _lookbackPendente = () => {
+        ref.orderByKey().startAt(pushIdMin(ini - FOLGA2)).endAt(pushIdMin(ini - FOLGA1)).get().then(sn=>{
+          if(tokC !== _cargaTok) return;
+          const ids = new Set(logs.map(x=>x.id));
+          const novos = paraLista(sn).filter(r=>{ const t = tsDe(r); return t>=ini && t<=fim && !ids.has(r.id); });
+          if(novos.length){ logs = logs.concat(novos).sort((a,b)=>tsDe(b)-tsDe(a)); preencherOpcoes(); desenhar(); }
+        }).catch(()=>{});
+      };
+    }catch(eChave){ console.warn('[Auditoria] Janela por chave indisponível; usando a consulta anterior:', eChave); lista = undefined; }
+    if(lista === undefined) try{
       // 1ª tentativa: consulta por período no servidor (precisa de ".indexOn": ["ts"] nas regras)
       lista = paraLista(await withTimeout(ref.orderByChild('ts').startAt(ini).endAt(fim).get(), 20000));
     }catch(e1){
@@ -7618,6 +7674,7 @@ setTimeout(()=>{
     logs = lista.sort((a,b)=>tsDe(b)-tsDe(a));
     preencherOpcoes();
     desenhar();
+    if(_lookbackPendente){ const f = _lookbackPendente; _lookbackPendente = null; f(); }
   }
 
   function preencherOpcoes(){
@@ -7654,10 +7711,7 @@ setTimeout(()=>{
     }
     const LIMITE = 1000;
     const vis = rows.slice(0, LIMITE);
-    out.innerHTML = `
-      <div class="tablewrap"><table class="report-table">
-        <thead><tr><th>Data</th><th>Horário</th><th>Usuário</th><th>Turno</th><th>Área</th><th>Item</th><th>Ação</th></tr></thead>
-        <tbody>${vis.map(r=>{
+    const linha = r=>{
           const t = tsDe(r);
           const d = new Date(t);
           const tip = 'Registrado em '+fmtFull.format(d)+' · Lançamento: '+(r.lancamentoId||r.itemId||'')+' · ID do log: '+r.id;
@@ -7673,11 +7727,21 @@ setTimeout(()=>{
             <td>${esc(r.item||'—')}${r.dataPlano?`<div class="aud-sub">Plano de ${esc(r.dataPlano.split('-').reverse().join('/'))}</div>`:''}</td>
             <td><span class="aud-acao ${r.acao==='desmarcou'?'desmarcou':'marcou'}">${r.acao==='desmarcou'?'Desmarcou':'Marcou'}</span></td>
           </tr>`;
-        }).join('')}</tbody>
+    };
+    const PRIMEIRAS = window.__dsDesk ? 120 : vis.length;     // desktop: 120 linhas na hora e o resto em lotes; mobile: tudo de uma vez, como sempre
+    out.innerHTML = `
+      <div class="tablewrap"><table class="report-table">
+        <thead><tr><th>Data</th><th>Horário</th><th>Usuário</th><th>Turno</th><th>Área</th><th>Item</th><th>Ação</th></tr></thead>
+        <tbody>${vis.slice(0, PRIMEIRAS).map(linha).join('')}</tbody>
       </table></div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:8px;">
         ${rows.length} registro(s)${rows.length>LIMITE?` · exibindo os ${LIMITE} mais recentes (reduza o período para ver os demais)`:''}
       </div>`;
+    if(vis.length > PRIMEIRAS){
+      const tb = out.querySelector('tbody'), tok = ++_desenhoTok; let k = PRIMEIRAS;
+      const lote = ()=>{ if(tok !== _desenhoTok || !tb || !tb.isConnected) return; tb.insertAdjacentHTML('beforeend', vis.slice(k, k+150).map(linha).join('')); k += 150; if(k < vis.length) requestAnimationFrame(lote); };
+      requestAnimationFrame(lote);
+    } else { _desenhoTok++; }
   }
 
   window.renderHistorico = renderHistorico;
@@ -7779,7 +7843,7 @@ setTimeout(()=>{
   const SLA_META_MS = SLA_META_H*3600000;
   const AZUL = '#2D3277', AMARELO = '#FFE600', AMARELO_BARRA = '#F5C400';
   const DIA_SEM = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
-  const grupoTurno = k => (k==='T1D'||k==='T2D') ? 'T1' : 'T2';   // T1 = Manhã | T2 = Noite
+  const grupoTurno = k => window.efDim ? window.efDim.grupoManha(k) : ((k==='T1D'||k==='T2D') ? 'T1' : 'T2');   // T1 = Manhã | T2 = Noite
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const p2 = n => String(n).padStart(2,'0');
   const ddmm = d => p2(d.getDate())+'/'+p2(d.getMonth()+1);
@@ -7844,12 +7908,12 @@ setTimeout(()=>{
       const r = { d, futuro: d>hoje,
                   T1:{prev:0, pres:0, lanc:false}, T2:{prev:0, pres:0, lanc:false} };
       if(r.futuro) return r;
-      const turnos = ef._turnos || activeTurns(d).map(t=>t.key);
+      const turnos = ef._turnos || turnosEfetivoDia(d).map(t=>t.key);
       turnos.forEach(tk=>{
         if(!Array.isArray(ef[tk])) return;            // turno sem lançamento de efetivo
         const g = grupoTurno(tk);
         r[g].lanc = true;
-        r[g].prev += TURNO_PREVISTO[tk] || 0;
+        r[g].prev += efPrevistoReg(ef, tk, dsOf(d));
         r[g].pres += ef[tk].length;
       });
       ['T1','T2'].forEach(g=>{ r[g].aus = Math.max(0, r[g].prev - r[g].pres); });
@@ -8334,9 +8398,9 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
    EFETIVO — CONSOLIDADO SEMANAL DE ABSENTEÍSMO
    ---------------------------------------------------------------------
    Aparece na aba 👷 Efetivo, logo abaixo do "Consolidado do mês".
-   Usa o MESMO parâmetro do relatório semanal (TURNO_PREVISTO):
-   quadro de 42 pessoas em escala 12x36 → 21 previstas por dia
-   (T1 Manhã 11 + T2 Noite 10), alternando equipes Par/Ímpar.
+   Usa o MESMO parâmetro do relatório semanal: o cadastro "Dimensionamento de Efetivo"
+   (vigente na data). Ex. na base original: quadro de 42 pessoas em escala 12x36 →
+   21 previstas por dia (T1 Manhã 11 + T2 Noite 10), alternando equipes Par/Ímpar.
    O cálculo é o mesmo do PDF (window.relAbsenteismo). Somente leitura.
    ===================================================================== */
 (function(){
@@ -8355,8 +8419,12 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
     const w = x.getDay(); x.setDate(x.getDate() - (w===0 ? 6 : w-1));
     return x;
   }
-  const quadro = () => Object.values(TURNO_PREVISTO).reduce((s,v)=>s+v,0);
-  const previstoDia = () => (TURNO_PREVISTO.T1D||0) + (TURNO_PREVISTO.T1N||0);
+  // Quadro / previsto do dia: vêm do cadastro "Dimensionamento de Efetivo", na data de referência da semana exibida.
+  const refData = () => new Date(semanaRef || currentDate);
+  const turnosRef = () => efDim.turnosDoDia(refData());
+  const quadro = () => efDim.turnos().filter(t=>efDim.ativoEm(t.key, dsOf(refData()))).reduce((s,t)=>s+efDim.previsto(t.key, dsOf(refData())),0);
+  const previstoDia = () => turnosRef().reduce((s,t)=>s+efDim.previsto(t.key, dsOf(refData())),0);
+  const detalheDia = () => turnosRef().map(t=>(efDim.grupoManha(t.key)==='T1'?'T1 Manhã':'T2 Noite')+' '+efDim.previsto(t.key, dsOf(refData()))).join(' + ');
 
   function injetar(){
     if(document.getElementById('efSemCard')) return;
@@ -8456,7 +8524,7 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
         </tbody>
       </table></div>
       <div style="font-size:11.5px;color:var(--text-dim);margin-top:10px;line-height:1.5;">
-        Quadro de ${quadro()} pessoas em escala 12x36: ${previstoDia()} previstas por dia (T1 Manhã ${TURNO_PREVISTO.T1D} + T2 Noite ${TURNO_PREVISTO.T1N}), alternando as equipes Par e Ímpar — mesmo parâmetro do relatório semanal.
+        Quadro de ${quadro()} pessoas em escala 12x36: ${previstoDia()} previstas por dia (${detalheDia()}), alternando as equipes Par e Ímpar — dimensionamento vigente em ${dsOf(refData()).split('-').reverse().join('/')}, o mesmo do relatório semanal.
         Absenteísmo = (previsto − presentes) ÷ previsto.${semLanc ? ` ${semLanc} turno(s) sem lançamento de efetivo não entraram no cálculo.` : ''}
       </div>`;
   }
@@ -9979,5 +10047,1390 @@ tr.sub td{color:#6b7280;font-size:7.5pt}
   }
 })();
 </script>
+<!-- ===== Dimensionamento de Efetivo (cadastro administrativo) ===== -->
+<script>
+/* =====================================================================
+   DIMENSIONAMENTO DE EFETIVO — efetivo PREVISTO por turno (parametrizável)
+   ---------------------------------------------------------------------
+   Antes: TURNO_PREVISTO = {T1D:11, T1N:10, T2D:11, T2N:10} fixo no código.
+   Agora: cadastro administrativo (mesmo padrão do cadastro de Áreas).
+
+   Firebase (mesmo banco/projeto):
+     sistema_limpeza/efetivoDim/turnos/{chave}
+         { nome, ordem, paridade:'par'|'impar'|'todos', periodo:'dia'|'noite',
+           periodos:[{de:'AAAA-MM-DD', ate:'AAAA-MM-DD'|(ausente = em aberto)}] }
+     sistema_limpeza/efetivoDim/vig/{chave}/{AAAA-MM-DD}
+         { padrao:<inteiro>, dias:{d0..d6:<inteiro>}  (opcional, 0=Dom), salvoEm, salvoPor }
+     sistema_limpeza/efetivoDimLog/{pushId}     (trilha: anterior × novo × vigência × usuário)
+
+   Vigência: o previsto de uma data usa a última versão com data <= aquela
+   data. Cada lançamento de efetivo também guarda uma cópia do previsto usado
+   (_previsto), então mudar o dimensionamento NUNCA altera lançamentos já
+   feitos. Nada é excluído: turnos só são desativados (período encerrado).
+
+   Migração: sem cadastro no banco, vale o valor original do código
+   (T1D 11 · T1N 10 · T2D 11 · T2N 10) como vigência "desde o início";
+   ao abrir a tela pela 1ª vez, o admin grava essa base 1 vez só (transação).
+   ===================================================================== */
+(function(){
+  'use strict';
+  /* Diagnóstico: abra o sistema com ?semdim=1 para desligar este módulo por completo. */
+  if(new URLSearchParams(location.search).get('semdim')==='1'){ console.warn('[Dimensionamento] desligado por ?semdim=1'); return; }
+  try{
+  const KIOSK = (()=>{ const p = new URLSearchParams(location.search); return p.get('tab')==='requests' || p.get('kiosk')==='1'; })();
+  const BASE = fbRoot.child('efetivoDim');
+  const LOG = fbRoot.child('efetivoDimLog');
+  const BASELINE = '2000-01-01';
+  const DIA_ABREV = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const PARIDADE_LBL = {par:'Dias pares', impar:'Dias ímpares', todos:'Todos os dias'};
+  const PERIODO_LBL = {dia:'Diurno', noite:'Noturno'};
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+  const hojeOp = () => dateStr(getOperationalDate());
+  const quem = () => (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || (typeof currentEmployee!=='undefined' && currentEmployee) || 'Administrador';
+  const fmtDs = ds => ds ? ds.split('-').reverse().join('/') : '—';
+  const partes = ds => ds.split('-').map(Number);
+  const wdOf = ds => { const [y,m,d] = partes(ds); return new Date(y, m-1, d).getDay(); };
+  const diaAnterior = ds => { const [y,m,d] = partes(ds); return dateStr(new Date(y, m-1, d-1)); };
+  const clone = o => JSON.parse(JSON.stringify(o));
+
+  /* ---------- base original (valores que estavam no código) ---------- */
+  const SEED = [
+    {key:'T1D', paridade:'par',   periodo:'dia'},
+    {key:'T1N', paridade:'par',   periodo:'noite'},
+    {key:'T2D', paridade:'impar', periodo:'dia'},
+    {key:'T2N', paridade:'impar', periodo:'noite'},
+  ];
+  function seedRaw(quemSalvou){
+    const raw = {turnos:{}, vig:{}};
+    SEED.forEach((s,i)=>{
+      raw.turnos[s.key] = {nome:TURNO_LABELS_PADRAO[s.key], ordem:i, paridade:s.paridade, periodo:s.periodo, periodos:[{de:BASELINE}], criadoEm:Date.now(), criadoPor:quemSalvou};
+      raw.vig[s.key] = {}; raw.vig[s.key][BASELINE] = {padrao:TURNO_PREVISTO_PADRAO[s.key], salvoEm:Date.now(), salvoPor:quemSalvou};
+    });
+    return raw;
+  }
+  function normalizar(raw){
+    const turnos = {}, vig = {};
+    Object.keys(raw.turnos||{}).forEach(k=>{
+      const t = raw.turnos[k]||{};
+      const per = Array.isArray(t.periodos) ? t.periodos : Object.values(t.periodos||{});
+      turnos[k] = {key:k, nome:t.nome||k, ordem:+t.ordem||0, paridade:t.paridade||'todos', periodo:t.periodo||'dia',
+                   periodos:per.filter(Boolean).map(p=>({de:p.de, ate:p.ate||null}))};
+    });
+    Object.keys(raw.vig||{}).forEach(k=>{
+      vig[k] = {};
+      Object.keys(raw.vig[k]||{}).forEach(ds=>{
+        const v = raw.vig[k][ds]||{}, dias = {};
+        Object.keys(v.dias||{}).forEach(dk=>{ const n = parseInt(v.dias[dk],10); if(/^d[0-6]$/.test(dk) && Number.isInteger(n) && n>=0) dias[+dk.slice(1)] = n; });
+        vig[k][ds] = {padrao:Math.max(0, parseInt(v.padrao,10)||0), dias, salvoEm:v.salvoEm, salvoPor:v.salvoPor};
+      });
+    });
+    return {turnos, vig};
+  }
+
+  let cache = normalizar(seedRaw('(valores do código)'));
+  let persistido = false;
+  let resolvePronto; const pronto = new Promise(r=>{ resolvePronto = r; });
+  const aoMudar = [];
+  const aguardar = () => Promise.race([pronto, new Promise(r=>setTimeout(r, 2500))]);   // espera no máximo 2,5 s
+
+  /* ---------- consultas (síncronas, usadas pelos cálculos) ---------- */
+  const listaTurnos = () => Object.values(cache.turnos).sort((a,b)=>(a.ordem-b.ordem)||a.key.localeCompare(b.key));
+  function vigenciaDe(tk, ds){
+    const vs = cache.vig[tk]; if(!vs) return null;
+    const datas = Object.keys(vs).sort(); if(!datas.length) return null;
+    let sel = null; for(const d of datas){ if(d<=ds) sel = d; else break; }
+    return sel || datas[0];                       // antes da 1ª versão vale a 1ª (base migrada)
+  }
+  function previsto(tk, ds){
+    const d = vigenciaDe(tk, ds);
+    if(!d) return TURNO_PREVISTO_PADRAO[tk] || 0;
+    const v = cache.vig[tk][d], o = v.dias && v.dias[wdOf(ds)];
+    return Number.isInteger(o) ? o : v.padrao;
+  }
+  function ativoEm(tk, ds){
+    const t = cache.turnos[tk]; if(!t) return !!TURNO_LABELS_PADRAO[tk];
+    return t.periodos.some(p=>p.de<=ds && (!p.ate || ds<=p.ate));
+  }
+  function nome(tk){ const t = cache.turnos[tk]; return t ? t.nome : null; }
+  function turnosDoDia(date){
+    const ds = dateStr(date||currentDate), par = (date||currentDate).getDate()%2===0;
+    if(!Object.keys(cache.turnos).length) return activeTurns(date);
+    return listaTurnos().filter(t=>ativoEm(t.key, ds) && (t.paridade==='todos' || (t.paridade==='par')===par))
+                        .map(t=>({key:t.key, label:t.nome}));
+  }
+  const grupoManha = k => { const t = cache.turnos[k]; return t ? (t.periodo==='dia'?'T1':'T2') : ((k==='T1D'||k==='T2D')?'T1':'T2'); };
+  const grupoPar   = k => { const t = cache.turnos[k]; return (k==='T1D'||k==='T1N') ? 'T1' : ((k==='T2D'||k==='T2N') ? 'T2' : (t && t.paridade==='par' ? 'T1' : 'T2')); };
+  /* Guarda, no próprio lançamento, o previsto usado — o histórico nunca muda retroativamente. */
+  function snapshot(ds, data){
+    if(!data || typeof data!=='object') return;
+    const ks = Array.isArray(data._turnos) ? data._turnos : Object.keys(data).filter(k=>Array.isArray(data[k]));
+    if(!data._previsto || typeof data._previsto!=='object') data._previsto = {};
+    ks.forEach(k=>{ if(data._previsto[k]==null) data._previsto[k] = previsto(k, ds); });
+  }
+  function descVig(tk, ds){
+    const d = vigenciaDe(tk, ds); if(!d) return '—';
+    const v = cache.vig[tk][d], ex = Object.keys(v.dias||{}).map(Number).sort().filter(i=>v.dias[i]!==v.padrao);
+    return v.padrao + (ex.length ? ' ('+ex.map(i=>DIA_ABREV[i]+' '+v.dias[i]).join(', ')+')' : '');
+  }
+
+  /* ---------- carregamento (tempo real) ---------- */
+  function receber(snap){
+    try{
+      const v = snap && snap.val();
+      if(v && v.turnos){ cache = normalizar(v); persistido = true; }
+      else { cache = normalizar(seedRaw('(valores do código)')); persistido = false; }
+    }catch(e){ console.warn('[Dimensionamento] cadastro ilegível, usando valores originais', e); cache = normalizar(seedRaw('(valores do código)')); persistido = false; }
+    resolvePronto(); aoMudar.forEach(f=>{ try{ f(); }catch(e){} });
+  }
+  if(KIOSK){ resolvePronto(); }
+  else {
+    try{ BASE.on('value', receber, ()=>{ resolvePronto(); }); }catch(e){ resolvePronto(); }
+    setTimeout(resolvePronto, 6000);
+  }
+
+  /* ---------- gravação (somente Admin; as regras do Firebase também exigem) ---------- */
+  function exigirAdmin(){ if(!isAdmin) throw new Error('Acesso restrito ao administrador.'); }
+  async function garantirBase(){
+    if(persistido) return;
+    const r = await BASE.transaction(cur => cur===null ? seedRaw('Migração (valores do código)') : undefined);
+    if(r.committed){
+      await LOG.push({ts:firebase.database.ServerValue.TIMESTAMP, usuario:quem(), turno:'*', turnoNome:'Todos', acao:'migracao',
+                      para:SEED.map(s=>TURNO_LABELS_PADRAO[s.key]+': '+TURNO_PREVISTO_PADRAO[s.key]).join(' · '), desde:BASELINE});
+    }
+    const s = await BASE.get(); receber(s);
+  }
+  const reInt = /^\d{1,4}$/;
+  function validarNome(n, ignorarKey){
+    n = String(n||'').replace(/\s+/g,' ').trim();
+    if(!n) throw new Error('Informe o nome do turno.');
+    if(n.length>60) throw new Error('O nome do turno pode ter no máximo 60 caracteres.');
+    if(/[<>"'`&\\]/.test(n)) throw new Error('O nome não pode conter < > " \' ` & \\.');
+    if(listaTurnos().some(t=>t.key!==ignorarKey && norm(t.nome)===norm(n))) throw new Error('Já existe um turno com esse nome.');
+    return n;
+  }
+  function validarQtd(v, rotulo){
+    const s = String(v==null?'':v).trim();
+    if(!reInt.test(s)) throw new Error(rotulo+': informe um número inteiro maior ou igual a zero (ex.: 11).');
+    return parseInt(s,10);
+  }
+  function validarDesde(ds){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(ds||''))) throw new Error('Informe a data de início da vigência.');
+    if(ds < hojeOp()) throw new Error('A vigência não pode começar antes de hoje ('+fmtDs(hojeOp())+'): os dias anteriores não são alterados.');
+    return ds;
+  }
+  function novaChave(){ return 'X'+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,4).toUpperCase(); }
+
+  /* dados = {key?, nome, paridade?, periodo?, padrao, dias:{0..6:valor|''}, desde} */
+  async function salvarTurno(dados){
+    exigirAdmin();
+    await garantirBase();
+    const existente = dados.key ? cache.turnos[dados.key] : null;
+    if(dados.key && !existente) throw new Error('Turno não encontrado.');
+    const nomeNovo = validarNome(dados.nome, dados.key);
+    const padrao = validarQtd(dados.padrao, 'Efetivo previsto');
+    const dias = {};
+    Object.keys(dados.dias||{}).forEach(i=>{
+      const raw = dados.dias[i]; if(raw===''||raw==null) return;
+      const n = validarQtd(raw, 'Efetivo de '+DIA_ABREV[+i]); if(n!==padrao) dias[+i] = n;
+    });
+    const desde = validarDesde(dados.desde);
+    const key = existente ? existente.key : novaChave();
+    const up = {}, logs = [];
+    const novoTexto = padrao + (Object.keys(dias).length ? ' ('+Object.keys(dias).map(Number).sort().map(i=>DIA_ABREV[i]+' '+dias[i]).join(', ')+')' : '');
+
+    if(!existente){
+      if(!PARIDADE_LBL[dados.paridade]) throw new Error('Escolha em quais dias o turno se aplica.');
+      if(!PERIODO_LBL[dados.periodo]) throw new Error('Escolha se o turno é diurno ou noturno.');
+      const ordem = Math.max(-1, ...listaTurnos().map(t=>t.ordem)) + 1;
+      up['turnos/'+key] = {nome:nomeNovo, ordem, paridade:dados.paridade, periodo:dados.periodo, periodos:[{de:desde}], criadoEm:Date.now(), criadoPor:quem()};
+      logs.push({acao:'criou_turno', turno:key, turnoNome:nomeNovo, de:'—', para:novoTexto, desde});
+    } else {
+      if(nomeNovo!==existente.nome){
+        up['turnos/'+key+'/nome'] = nomeNovo;
+        logs.push({acao:'renomeou', turno:key, turnoNome:nomeNovo, de:existente.nome, para:nomeNovo, desde:hojeOp()});
+      }
+    }
+    const antesTxt = existente ? descVig(key, desde) : '—';
+    if(existente){
+      const mudou = previsto0(existente.key, desde) !== padrao || JSON.stringify(dias) !== JSON.stringify(diasDe(key, desde));
+      if(mudou) logs.push({acao:'alterou_previsto', turno:key, turnoNome:nomeNovo, de:antesTxt, para:novoTexto, desde});
+      if(!mudou && !logs.length) throw new Error('Nenhuma alteração para salvar.');
+    }
+    const gravaVig = !existente || logs.some(l=>l.acao==='alterou_previsto');
+    if(gravaVig){
+      if(desde <= hojeOp()) await congelarHoje(key);      // não altera lançamentos de hoje já feitos
+      const v = {padrao, salvoEm:Date.now(), salvoPor:quem()};
+      if(Object.keys(dias).length){ v.dias = {}; Object.keys(dias).forEach(i=>{ v.dias['d'+i] = dias[i]; }); }
+      up['vig/'+key+'/'+desde] = v;
+    }
+    await BASE.update(up);
+    for(const l of logs) await LOG.push(Object.assign({ts:firebase.database.ServerValue.TIMESTAMP, usuario:quem()}, l));
+    return key;
+  }
+  const previsto0 = (tk, ds) => previsto(tk, ds);
+  const diasDe = (tk, ds) => { const d = vigenciaDe(tk, ds); return d ? Object.assign({}, cache.vig[tk][d].dias) : {}; };
+  /* Antes de uma vigência começar hoje: grava o previsto antigo nos lançamentos de hoje que ainda não o guardavam. */
+  async function congelarHoje(tk){
+    try{
+      const ds = hojeOp(), s = await window.storage.get('efetivo:'+ds, true);
+      if(!s) return; const data = JSON.parse(s.value);
+      if(data && data._previsto && data._previsto[tk]!=null) return;
+      if(!data || !Array.isArray(data[tk])) return;
+      snapshot(ds, data); await window.storage.set('efetivo:'+ds, JSON.stringify(data), true);
+    }catch(e){ console.warn('[Dimensionamento] congelarHoje', e); }
+  }
+
+  async function alternarAtivo(key, ativar, desdeStr){
+    exigirAdmin(); await garantirBase();
+    const t = cache.turnos[key]; if(!t) throw new Error('Turno não encontrado.');
+    const desde = validarDesde(desdeStr);
+    const per = t.periodos.map(p=>({de:p.de, ate:p.ate||null}));
+    const ult = per[per.length-1];
+    if(ativar){
+      if(ult && !ult.ate) throw new Error('O turno já está ativo.');
+      if(ult && ult.ate && desde<=ult.ate) throw new Error('A reativação deve começar depois de '+fmtDs(ult.ate)+'.');
+      per.push({de:desde});
+    } else {
+      if(!ult || ult.ate) throw new Error('O turno já está inativo.');
+      if(desde<=ult.de) throw new Error('O turno começou em '+fmtDs(ult.de)+'. Escolha uma data posterior.');
+      ult.ate = diaAnterior(desde);
+    }
+    await BASE.child('turnos/'+key+'/periodos').set(per);
+    await LOG.push({ts:firebase.database.ServerValue.TIMESTAMP, usuario:quem(), acao:ativar?'ativou':'desativou', turno:key, turnoNome:t.nome,
+                    de:ativar?'Inativo':'Ativo', para:ativar?'Ativo':'Inativo', desde});
+  }
+  async function listarLog(){ const s = await LOG.limitToLast(200).get(); const o = s.val()||{}; return Object.keys(o).map(k=>o[k]).sort((a,b)=>(b.ts||0)-(a.ts||0)); }
+
+  window.efDim = {pronto, aguardar, previsto, vigenciaDe, ativoEm, nome, turnosDoDia, grupoManha, grupoPar, snapshot, descVig,
+                  turnos:listaTurnos, salvarTurno, alternarAtivo, listarLog, hoje:hojeOp, aoMudar, get persistido(){ return persistido; }, garantirBase};
+
+  /* Os consumidores sempre esperam o cadastro carregar antes de ler os lançamentos. */
+  const _le = loadEfetivo;
+  loadEfetivo = async function(){ try{ await aguardar(); }catch(e){} return _le.apply(this, arguments); };
+
+  /* ------------------------------------------------------------------
+     Tela administrativa
+     ------------------------------------------------------------------ */
+  const style = document.createElement('style');
+  style.textContent = `
+    .dm-st{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+    .dm-st.on{background:rgba(76,175,110,.18);color:var(--ok)} .dm-st.off{background:rgba(255,255,255,.08);color:var(--text-dim)}
+    .dm-num{font-size:18px;font-weight:800} .dm-sub{font-size:11.5px;color:var(--text-dim);margin-top:2px}
+    tr.dm-inativo td{opacity:.55}
+    .dm-dias{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:6px}
+    .dm-dias div{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--text-dim)}
+    .dm-dias input{width:100%;text-align:center}
+  `;
+  document.head.appendChild(style);
+
+  async function renderDimensionamento(){
+    const app = document.getElementById('app');
+    if(!isAdmin){ app.innerHTML = '<div class="empty-state" style="margin-top:40px;">⛔ Acesso restrito ao administrador.</div>'; return; }
+    app.innerHTML = `
+      <div style="max-width:1100px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+          <div><div style="font-size:18px;font-weight:700;">📐 Dimensionamento de Efetivo</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-top:2px;">Efetivo previsto por turno, usado na aba Efetivo e nos relatórios de aderência e absenteísmo. Alterações valem a partir da data escolhida; os dias anteriores e os lançamentos já feitos não mudam.</div></div>
+          <button class="btn" id="dmNovo">+ Novo turno</button>
+        </div>
+        <div id="dmLista"><div class="loading">Carregando dimensionamento...</div></div>
+        <div style="font-size:16px;font-weight:700;margin:26px 0 8px;">🕘 Histórico de alterações</div>
+        <div id="dmHist"><div class="loading">Carregando histórico...</div></div>
+      </div>`;
+    document.getElementById('dmNovo').onclick = ()=>abrirModal(null);
+    await pronto;
+    try{ await garantirBase(); }catch(e){ console.warn('[Dimensionamento] base', e); }
+    desenhar(); desenharHistorico();
+  }
+  function proximaVig(tk, ds){ const ds2 = Object.keys(cache.vig[tk]||{}).sort().find(d=>d>ds); return ds2 ? {desde:ds2, txt:descVig(tk, ds2)} : null; }
+
+  function desenhar(){
+    const out = document.getElementById('dmLista'); if(!out) return;
+    const hoje = hojeOp(), ts = listaTurnos();
+    if(!ts.length){ out.innerHTML = '<div class="empty-state">Nenhum turno cadastrado.</div>'; return; }
+    out.innerHTML = `
+      ${persistido ? '' : '<div style="background:rgba(227,179,65,.1);border:1px solid rgba(227,179,65,.3);border-radius:8px;padding:10px 14px;font-size:12px;color:#e3b341;margin-bottom:12px;">Exibindo os valores originais do sistema (T1 Par 11 · T2 Par 10 · T1 Ímpar 11 · T2 Ímpar 10). Eles serão gravados no cadastro automaticamente.</div>'}
+      <div class="tablewrap"><table class="report-table">
+        <thead><tr><th>Turno</th><th>Aplica-se a</th><th>Efetivo previsto</th><th>Vigência atual</th><th>Status</th><th style="text-align:right;">Ações</th></tr></thead>
+        <tbody>${ts.map(t=>{
+          const at = ativoEm(t.key, hoje), vd = vigenciaDe(t.key, hoje), prox = proximaVig(t.key, hoje);
+          const ult = t.periodos[t.periodos.length-1];
+          const aviso = ult && ult.ate && ult.ate>=hoje ? `<div class="dm-sub">Encerra em ${fmtDs(ult.ate)}</div>` : '';
+          return `<tr class="${at?'':'dm-inativo'}">
+            <td><div style="font-weight:600;">${esc(t.nome)}</div><div class="dm-sub">${PERIODO_LBL[t.periodo]||''}</div></td>
+            <td>${PARIDADE_LBL[t.paridade]||'—'}</td>
+            <td><div class="dm-num">${esc(descVig(t.key, hoje))}</div>${prox?`<div class="dm-sub">Próxima: ${esc(prox.txt)} a partir de ${fmtDs(prox.desde)}</div>`:''}</td>
+            <td style="white-space:nowrap;">${vd===BASELINE?'<span style="color:var(--text-dim);">Desde o início</span>':'Desde '+fmtDs(vd)}</td>
+            <td><span class="dm-st ${at?'on':'off'}">${at?'Ativo':'Inativo'}</span>${aviso}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="btn small secondary" data-dm-edit="${esc(t.key)}">Editar</button>
+              <button class="btn small secondary" data-dm-tog="${esc(t.key)}" style="${at?'color:var(--bad);border-color:var(--bad);':'color:var(--ok);border-color:var(--ok);'}">${at?'Desativar':'Reativar'}</button>
+            </td></tr>`; }).join('')}</tbody></table></div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:8px;">Turnos não são excluídos: ao desativar, os lançamentos anteriores continuam nos relatórios.</div>`;
+    out.querySelectorAll('[data-dm-edit]').forEach(b=>b.onclick = ()=>abrirModal(b.getAttribute('data-dm-edit')));
+    out.querySelectorAll('[data-dm-tog]').forEach(b=>b.onclick = ()=>abrirModalStatus(b.getAttribute('data-dm-tog')));
+  }
+  async function desenharHistorico(){
+    const out = document.getElementById('dmHist'); if(!out) return;
+    let log = []; try{ log = await listarLog(); }catch(e){ out.innerHTML = '<div class="empty-state">Não foi possível carregar o histórico.</div>'; return; }
+    const ACAO = {criou_turno:'Novo turno', alterou_previsto:'Alterou previsto', renomeou:'Renomeou', ativou:'Reativou', desativou:'Desativou', migracao:'Base inicial (migração)'};
+    out.innerHTML = log.length ? `<div class="tablewrap"><table class="report-table">
+      <thead><tr><th>Data/hora</th><th>Usuário</th><th>Turno</th><th>Ação</th><th>Valor anterior</th><th>Valor novo</th><th>Vigência a partir de</th></tr></thead>
+      <tbody>${log.map(l=>`<tr><td style="white-space:nowrap;">${l.ts?esc(fmtBRTime(new Date(l.ts))):'—'}</td><td>${esc(l.usuario||'—')}</td><td>${esc(l.turnoNome||'—')}</td>
+        <td>${esc(ACAO[l.acao]||l.acao)}</td><td>${esc(l.de||'—')}</td><td>${esc(l.para||'—')}</td><td style="white-space:nowrap;">${l.desde===BASELINE?'Desde o início':fmtDs(l.desde)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty-state">Nenhuma alteração registrada.</div>';
+  }
+  aoMudar.push(()=>{ if(document.getElementById('dmLista')){ desenhar(); } });
+
+  function abrirModal(key){
+    document.getElementById('dmModal')?.remove();
+    const t = key ? cache.turnos[key] : null, hoje = hojeOp();
+    const vd = t ? vigenciaDe(key, hoje) : null, v = t && vd ? cache.vig[key][vd] : null;
+    const temDias = !!(v && Object.keys(v.dias||{}).length);
+    const ov = document.createElement('div'); ov.id = 'dmModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;">
+        <div style="font-size:16px;font-weight:700;margin-bottom:14px;">${t?'✏️ Editar turno':'+ Novo turno'}</div>
+        <div class="form-row"><label>Nome do turno *</label><input type="text" id="dmNome" maxlength="60" value="${esc(t?t.nome:'')}" placeholder="Ex.: T1 Ímpar (Diurno)"></div>
+        ${t ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">${PARIDADE_LBL[t.paridade]} · ${PERIODO_LBL[t.periodo]}</div>` : `
+        <div class="form-row"><label>Aplica-se a *</label><select id="dmParidade"><option value="">— Selecione —</option>${Object.keys(PARIDADE_LBL).map(k=>`<option value="${k}">${PARIDADE_LBL[k]}</option>`).join('')}</select></div>
+        <div class="form-row"><label>Período do dia *</label><select id="dmPeriodo"><option value="">— Selecione —</option>${Object.keys(PERIODO_LBL).map(k=>`<option value="${k}">${PERIODO_LBL[k]}</option>`).join('')}</select>
+          <div style="font-size:11.5px;color:var(--text-dim);">Define se entra em "T1 (Manhã)" ou "T2 (Noite)" nos relatórios.</div></div>`}
+        <div class="form-row"><label>Efetivo previsto (todos os dias) *</label><input type="text" inputmode="numeric" id="dmPadrao" maxlength="4" value="${v?v.padrao:''}" placeholder="Ex.: 11"></div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-bottom:4px;"><input type="checkbox" id="dmUsaDias" ${temDias?'checked':''}> Definir efetivo diferente em dias da semana específicos</label>
+        <div id="dmDiasBox" style="display:${temDias?'block':'none'};margin-bottom:10px;">
+          <div class="dm-dias">${DIA_ABREV.map((d,i)=>`<div>${d}<input type="text" inputmode="numeric" maxlength="4" data-dm-dia="${i}" value="${v&&v.dias&&v.dias[i]!=null?v.dias[i]:''}" placeholder="igual"></div>`).join('')}</div>
+          <div style="font-size:11.5px;color:var(--text-dim);margin-top:4px;">Deixe em branco os dias que seguem o valor geral.</div>
+        </div>
+        <div class="form-row"><label>Vigência a partir de *</label><input type="date" id="dmDesde" min="${hoje}" value="${hoje}">
+          <div style="font-size:11.5px;color:var(--text-dim);">Valores anteriores a esta data e lançamentos já feitos permanecem como estão.${vd&&vd!==BASELINE?' Vigência atual: desde '+fmtDs(vd)+'.':''}</div></div>
+        <div id="dmErr" style="color:var(--bad);font-size:12.5px;min-height:18px;margin-top:4px;"></div>
+        <div style="display:flex;gap:10px;margin-top:6px;"><button class="btn" id="dmSalvar" style="flex:1;">Salvar</button><button class="btn secondary" id="dmCancelar" style="flex:1;">Cancelar</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    const $ = id => ov.querySelector('#'+id);
+    $('dmUsaDias').onchange = e=>{ $('dmDiasBox').style.display = e.target.checked ? 'block' : 'none'; };
+    $('dmCancelar').onclick = ()=>ov.remove();
+    $('dmSalvar').onclick = async ()=>{
+      const btn = $('dmSalvar'), err = $('dmErr'); err.textContent = ''; btn.disabled = true; btn.textContent = 'Salvando...';
+      const dias = {}; if($('dmUsaDias').checked) ov.querySelectorAll('[data-dm-dia]').forEach(i=>{ dias[i.getAttribute('data-dm-dia')] = i.value; });
+      try{
+        await salvarTurno({key:key||null, nome:$('dmNome').value, paridade:$('dmParidade')?.value, periodo:$('dmPeriodo')?.value, padrao:$('dmPadrao').value, dias, desde:$('dmDesde').value});
+        ov.remove(); desenhar(); desenharHistorico();
+      }catch(e){ err.textContent = '❌ '+(e.message||'Não foi possível salvar.'); btn.disabled = false; btn.textContent = 'Salvar'; }
+    };
+  }
+  function abrirModalStatus(key){
+    document.getElementById('dmModal')?.remove();
+    const t = cache.turnos[key]; if(!t) return;
+    const hoje = hojeOp(), ativar = !ativoEm(key, hoje) || (t.periodos.length && !!t.periodos[t.periodos.length-1].ate);
+    const ov = document.createElement('div'); ov.id = 'dmModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = `<div style="background:var(--panel);border:1px solid var(--teal);border-radius:14px;padding:22px;max-width:460px;width:100%;">
+      <div style="font-size:16px;font-weight:700;margin-bottom:10px;">${ativar?'Reativar':'Desativar'} turno</div>
+      <div style="font-size:13px;margin-bottom:12px;"><b>${esc(t.nome)}</b><br><span style="color:var(--text-dim);">${ativar?'O turno volta a aparecer no lançamento de efetivo a partir da data escolhida.':'O turno deixa de aparecer no lançamento de efetivo a partir da data escolhida. Os lançamentos anteriores são preservados.'}</span></div>
+      <div class="form-row"><label>A partir de</label><input type="date" id="dmDesde" min="${hoje}" value="${hoje}"></div>
+      <div id="dmErr" style="color:var(--bad);font-size:12.5px;min-height:18px;"></div>
+      <div style="display:flex;gap:10px;"><button class="btn" id="dmOk" style="flex:1;">Confirmar</button><button class="btn secondary" id="dmCancelar" style="flex:1;">Cancelar</button></div></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#dmCancelar').onclick = ()=>ov.remove();
+    ov.querySelector('#dmOk').onclick = async ()=>{
+      const err = ov.querySelector('#dmErr'); err.textContent = '';
+      try{ await alternarAtivo(key, ativar, ov.querySelector('#dmDesde').value); ov.remove(); desenhar(); desenharHistorico(); }
+      catch(e){ err.textContent = '❌ '+(e.message||'Não foi possível salvar.'); }
+    };
+  }
+  window.renderDimensionamento = renderDimensionamento;
+
+  /* ------------------------------------------------------------------
+     Navegação (desktop + menu "Mais" do celular) — somente Admin
+     ------------------------------------------------------------------ */
+  function atualizarVisibilidade(){
+    const show = !!isAdmin;
+    const b = document.getElementById('navDim');
+    if(b){ b.style.display = show ? '' : 'none'; b.classList.toggle('active', section==='dimens'); }
+    const mb = document.getElementById('msheetDim'); if(mb) mb.style.display = show ? '' : 'none';
+  }
+  function abrirDim(){
+    if(!isAdmin){ alert('Acesso restrito ao administrador.'); return; }
+    section = 'dimens'; renderTopControls();
+    if(typeof window.updateMobileActiveState === 'function') window.updateMobileActiveState('navDim');
+    renderDimensionamento();
+  }
+  function instalarNavegacao(){
+    if(KIOSK) return;
+    const nav = document.querySelector('.mainnav');
+    if(nav && !document.getElementById('navDim')){
+      const b = document.createElement('button'); b.id = 'navDim'; b.textContent = '📐 Dimensionamento'; b.style.display = 'none';
+      nav.insertBefore(b, document.getElementById('navAdmin')); b.addEventListener('click', abrirDim);
+    }
+    /* (sem item no menu "Mais" do celular: o Dimensionamento é só do desktop) */
+    atualizarVisibilidade();
+  }
+  const _rtc = renderTopControls;
+  renderTopControls = function(){ const r = _rtc.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _sab = showAdminBadge;
+  showAdminBadge = function(){ const r = _sab.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _alo = adminLogout;
+  adminLogout = function(){ if(section==='dimens') section='checklist'; const r = _alo.apply(this, arguments); atualizarVisibilidade(); return r; };
+  const _rul = renderUserLogin;
+  renderUserLogin = async function(){ if(section==='dimens') section='checklist'; const r = await _rul.apply(this, arguments); atualizarVisibilidade(); return r; };
+  instalarNavegacao();
+  }catch(erro){
+    /* Se algo falhar, o módulo se desliga e o sistema funciona exatamente como antes (valores originais do código). */
+    window.efDim = undefined;
+    console.error('[Dimensionamento] módulo desativado por erro:', erro);
+  }
+})();
+</script>
+
+<style id="ds-estilo">
+/* ═══════════════════════════════════════════════════════════════════
+   REDESIGN DESKTOP — tela inicial, cabeçalho e menu lateral
+   • Tudo abaixo vale SOMENTE em telas largas: o menu lateral/cabeçalho em ≥900px
+     (classe body.ds-on) e o novo painel em ≥769px (marcação .ds-home, que o
+     celular nunca recebe). Nenhuma regra mobile existente foi alterada.
+   ═══════════════════════════════════════════════════════════════════ */
+:root{--ds-bg:#0a1220;--ds-bg2:#070e1b;--ds-panel:#101a2c;--ds-panel2:#0d1626;--ds-line:#1e2c45;--ds-text:#e8eef8;--ds-dim:#8c9bb3;--ds-yellow:#ffe600;--ds-green:#22d3a0;--ds-blue:#4f8cff;--ds-red:#ef5350;--ds-amber:#f5b301;--ds-side:204px;}
+#dsSide{display:none;}
+.ds-hide-mq{display:none;}
+
+/* ───────────── MENU LATERAL + CABEÇALHO (≥ 900px) ───────────── */
+@media (min-width:900px){
+  body.ds-on{background:var(--ds-bg);}
+  body.ds-on.sec-home{background:var(--ds-bg2);}
+  body.ds-on .mainnav{display:none !important;}
+  body.ds-on #dsSide{display:flex;position:fixed;left:0;top:0;bottom:0;width:var(--ds-side);background:var(--ds-bg);border-right:1px solid var(--ds-line);flex-direction:column;z-index:320;padding:0 10px 16px;overflow-y:auto;font-family:'Segoe UI',Arial,sans-serif;}
+  #dsSide .ds-brand{height:64px;flex:0 0 64px;display:flex;align-items:center;gap:8px;padding:0 4px;margin:0 -10px 14px;padding-left:14px;border-bottom:1px solid var(--ds-line);}
+  #dsSide .ds-brand img{height:39px;width:auto;display:block;}
+  #dsSide .ds-brand b{font-size:15px;line-height:1.02;color:#fff;font-weight:700;letter-spacing:-.2px;}
+  #dsSide .ds-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;height:36px;padding:0 12px;margin:0 0 4px;border:none;border-radius:8px;background:transparent;color:#d3dcea;font-size:13px;font-weight:500;text-align:left;cursor:pointer;font-family:inherit;}
+  #dsSide .ds-item svg{width:18px;height:18px;flex:0 0 18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  #dsSide .ds-item:hover{background:#142036;color:#fff;}
+  #dsSide .ds-item.active{background:var(--ds-yellow);color:#14181f;font-weight:700;}
+  #dsSide .ds-item.adm.active{background:transparent;color:#d3dcea;font-weight:500;} #dsSide .ds-item .ds-on-dot{display:none;width:8px;height:8px;border-radius:50%;background:var(--ds-yellow);margin-left:auto;margin-right:6px;} #dsSide .ds-item.adm.active .ds-on-dot{display:block;}
+  #dsSide .ds-item .ds-badge{margin-left:auto;min-width:22px;height:20px;padding:0 6px;border-radius:11px;background:var(--ds-yellow);color:#14181f;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;}
+  #dsSide .ds-item.active .ds-badge{background:#14181f;color:var(--ds-yellow);}
+  #dsSide .ds-item .ds-chev{margin-left:auto;width:14px;height:14px;flex:0 0 14px;opacity:.7;}
+  #dsSide .ds-sep{height:1px;background:var(--ds-line);margin:12px 4px;}
+  #dsSide .ds-foot{margin-top:auto;display:flex;gap:10px;align-items:stretch;padding:10px 4px 0;color:#cdd7e6;font-size:12px;line-height:1.35;}
+  #dsSide .ds-foot i{width:3px;border-radius:2px;background:var(--ds-yellow);flex:0 0 3px;}
+
+  body.ds-on .topbar{position:fixed;top:0;left:var(--ds-side);right:0;height:64px;padding:0 24px;background:var(--ds-bg);border-bottom:1px solid var(--ds-line);flex-wrap:nowrap;gap:16px;justify-content:flex-start;align-items:center;}
+  body.ds-on .topbar h1{font-size:16px;font-weight:700;color:#fff;letter-spacing:.1px;white-space:nowrap;}
+  body.ds-on .topbar > div:first-child{flex:0 0 auto;}
+  body.ds-on .topbar .sub{font-size:0;margin-top:1px;opacity:1;}
+  body.ds-on .topbar .sub::after{content:'MG02 • Betim';font-size:12px;color:var(--ds-dim);}
+  body.ds-on .topbar .controls{margin-left:auto;flex-wrap:nowrap;gap:10px;}
+  body.ds-on .topbar .controls > div[style*="column"]{flex-direction:row !important;gap:0 !important;}
+  body.ds-on .topbar .controls > div[style*="column"] > span{display:none;}
+  body.ds-on .topbar input[type=date]{height:36px;background:var(--ds-panel2);border:1px solid #26365a;border-radius:8px;color:var(--ds-text);padding:0 10px;font-size:13px;font-family:inherit;}
+  body.ds-on .topbar .nav-btn{width:32px;height:36px;background:var(--ds-panel2);border:1px solid #26365a;border-radius:8px;color:var(--ds-text);}
+  body.ds-on .topbar .nav-btn:hover{border-color:var(--ds-yellow);color:var(--ds-yellow);}
+  body.ds-on .topbar .controls .btn.small,body.ds-on .topbar #homeHoje{height:36px;background:var(--ds-panel2) !important;border:1px solid #26365a !important;color:var(--ds-text) !important;border-radius:8px !important;padding:0 12px !important;font-size:12.5px !important;}
+  body.ds-on .topbar .seg{background:var(--ds-panel2);border:1px solid #26365a;}
+  body.ds-on .topbar .seg button.active{background:var(--ds-yellow);color:#14181f;}
+  body.ds-on .topbar .header-turn-selector button{background:var(--ds-panel2);border:1px solid #26365a;color:var(--ds-text);}
+  body.ds-on .topbar .header-turn-selector button.active{background:var(--ds-yellow);color:#14181f;border-color:var(--ds-yellow);}
+  body.ds-on .topbar .controls select{height:36px;background:var(--ds-panel2);border:1px solid #26365a;color:var(--ds-text);border-radius:8px;}
+  #dsBell{order:4;position:relative;width:38px;height:38px;border-radius:10px;border:none;background:transparent;color:#e8eef8;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  #dsBell:hover{background:#142036;} #dsBell svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  #dsBell i{position:absolute;top:6px;right:8px;width:9px;height:9px;border-radius:50%;background:var(--ds-yellow);box-shadow:0 0 0 2px var(--ds-bg);display:none;} #dsBell.on i{display:block;}
+  .ds-user{order:5;position:relative;display:flex;align-items:center;gap:10px;padding:0 6px 0 14px;margin-left:4px;border-left:1px solid var(--ds-line);height:40px;cursor:pointer;color:var(--ds-text);background:transparent !important;border-radius:0 !important;}
+  .ds-user .ds-av{width:34px;height:34px;border-radius:50%;background:#e9edf5;color:#2b3550;display:flex;align-items:center;justify-content:center;flex:0 0 34px;}
+  .ds-user .ds-av svg{width:20px;height:20px;fill:currentColor;}
+  .ds-user .ds-un{display:flex;flex-direction:column;line-height:1.2;} .ds-user .ds-un b{font-size:12.5px;font-weight:600;color:#fff;white-space:nowrap;} .ds-user .ds-un small{font-size:11px;color:var(--ds-dim);}
+  .ds-user .ds-uc{width:14px;height:14px;stroke:var(--ds-dim);fill:none;stroke-width:2;} .ds-user #btnChangePin,.ds-user #btnLogoutUser{display:none !important;}
+  .ds-umenu{position:absolute;top:46px;right:0;min-width:170px;background:var(--ds-panel);border:1px solid var(--ds-line);border-radius:10px;padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.45);display:none;z-index:500;}
+  .ds-umenu.open{display:block;} .ds-umenu button{display:block;width:100%;text-align:left;background:transparent;border:none;color:var(--ds-text);font-size:13px;padding:9px 12px;border-radius:7px;cursor:pointer;font-family:inherit;} .ds-umenu button:hover{background:#17253d;}
+  body.ds-on .wrap{margin:0 0 0 var(--ds-side);max-width:none;padding:78px 28px 40px;}
+  body.ds-on:not(.sec-home) .wrap{max-width:calc(var(--ds-side) + 1240px);}
+}
+
+/* data em formato de pílula (o input nativo continua funcionando por baixo) */
+@media (min-width:900px){
+  .ds-dp{order:2;position:relative;display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;border:1px solid #26365a;border-radius:8px;background:var(--ds-panel2);color:var(--ds-text);font-size:12.5px;cursor:pointer;white-space:nowrap;}
+  .ds-dp:hover{border-color:var(--ds-yellow);} .ds-dp svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  .ds-dp input[type=date]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:none;padding:0;}
+  .ds-dp .ds-dp-c{width:14px;height:14px;stroke:var(--ds-dim);stroke-width:2;}
+  .ds-kic .ds-ex{font-size:26px;font-weight:800;line-height:1;}
+}
+
+@media (max-width:1360px){ .ds-ch h3{font-size:13.5px;} .ds-info{display:none;} .ds-ch select{padding:0 6px;font-size:12px;} .ds-ch{gap:6px;} .ds-kv{font-size:28px;} }
+@media (max-width:1100px) and (min-width:900px){ body.ds-on .topbar{padding:0 14px;gap:10px;} .ds-user .ds-un small{display:none;} .ds-user{padding-left:10px;} .ds-dp{padding:0 8px;} }
+
+/* Faixa de tablet largo (769–899px, sem menu lateral): o menu superior original rola dentro de si, sem criar rolagem horizontal na página */
+@media (min-width:769px) and (max-width:899px){
+  .mainnav{overflow-x:auto;scrollbar-width:thin;}
+  .mainnav button{flex:0 0 auto;white-space:nowrap;}
+}
+
+/* esqueleto de carregamento (animação só de opacidade = barata para o navegador) */
+.ds-sk{display:block;border-radius:6px;background:#1a2a45;animation:dsSk 1.1s ease-in-out infinite alternate;}
+.ds-skc{background:#1a2a45;animation:dsSk 1.1s ease-in-out infinite alternate;}
+@keyframes dsSk{from{opacity:.45}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){ .ds-sk,.ds-skc{animation:none;} }
+
+@media (min-width:769px){
+/* ── FLUIDEZ: o anel pulsante das atividades atrasadas animava box-shadow (repintura contínua de dezenas de células).
+      Agora: anel animado por transform/opacity (só composição) que pulsa 5× ao abrir a tela e então para — a célula segue vermelha.
+      Sem isso, dezenas de células repintando o tempo todo deixavam a tela pesada. ── */
+@keyframes dsRing{0%{transform:scale(1);opacity:.8;}70%,100%{transform:scale(1.34);opacity:0;}}
+.occ.overdue{animation:none;position:relative;}
+.occ.overdue::after{content:'';position:absolute;inset:0;border-radius:7px;border:2px solid rgba(217,106,90,.75);pointer-events:none;opacity:0;animation:dsRing 1.4s ease-out 5;}   /* 5 pulsos ao abrir a tela e para (antes: infinito) */
+.occ.blocked-late::after{display:none;}
+@media (prefers-reduced-motion:reduce){ .occ.overdue::after{animation:none;opacity:0;} }
+
+/* legenda "atrasado" (1 bolinha com pulso infinito em box-shadow): mesmo tratamento — anel que pulsa 5× e para */
+span.dot.bad[style*="overduePulse"]{animation:none !important;position:relative;}
+span.dot.bad[style*="overduePulse"]::after{content:'';position:absolute;inset:0;border-radius:50%;border:2px solid rgba(217,106,90,.75);pointer-events:none;opacity:0;animation:dsRing 1.4s ease-out 5;}
+}
+
+
+
+/* ═══════════ PAINEL INICIAL GERENCIAL (desktop ≥769px; o celular nunca recebe .pn) ═══════════ */
+/* seletor de período no cabeçalho */
+body.ds-periodo .topbar .controls > div[style*="column"], body.ds-periodo #homePrevBtn, body.ds-periodo #homeNextBtn, body.ds-periodo #homeHoje, body.ds-periodo .topbar .ds-dp{display:none !important;}
+.pn-sel{order:1;position:relative;}
+.pn-sel-b{display:flex;align-items:center;gap:12px;height:44px;min-width:236px;padding:0 14px;background:#0d1626;border:1px solid #26365a;border-radius:10px;color:#e8eef8;cursor:pointer;font-family:inherit;text-align:left;}
+.pn-sel-b:hover{border-color:#3a5288;} .pn-sel-b svg{width:19px;height:19px;stroke:#e8eef8;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 19px;}
+.pn-sel-t{display:flex;flex-direction:column;line-height:1.25;flex:1;} .pn-sel-t small{font-size:10px;color:#9fb0c9;} .pn-sel-t b{font-size:13px;color:#fff;font-weight:700;} .pn-sel-t em{font-style:normal;font-size:10px;color:#9fb0c9;display:flex;align-items:center;gap:6px;}
+.pn-sel-t em i{width:6px;height:6px;border-radius:50%;background:#6b7a96;} .pn-sel-t em i.on{background:#22d3a0;}
+.pn-sel-b .pn-sel-c{width:13px;height:13px;flex:0 0 13px;stroke:#9fb0c9;}
+.pn-sel-m{display:none;position:absolute;top:50px;left:0;min-width:100%;max-height:340px;overflow:auto;background:#101a2c;border:1px solid #26365a;border-radius:10px;padding:6px;box-shadow:0 12px 30px rgba(0,0,0,.5);z-index:600;}
+.pn-sel-m.open{display:block;} .pn-sel-m button{display:block;width:100%;text-align:left;padding:9px 12px;border:none;border-radius:7px;background:transparent;color:#dbe4f3;font-size:13px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.pn-sel-m button:hover{background:#17253d;} .pn-sel-m button.sel{background:#ffe600;color:#14181f;font-weight:700;} .pn-sel-sep{height:1px;background:#22314d;margin:6px 4px;}
+.pn-prox{order:1;width:40px;height:44px;border-radius:10px;background:#0d1626;border:1px solid #26365a;color:#e8eef8;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;}
+.pn-prox svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} .pn-prox:hover:not(:disabled){border-color:#ffe600;color:#ffe600;} .pn-prox:disabled{opacity:.4;cursor:default;}
+
+/* estrutura */
+.pn{max-width:1640px;margin:0 auto;font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#e8eef8;display:flex;flex-direction:column;gap:10px;} .pn *{box-sizing:border-box;} .pn button{font-family:inherit;}
+.pn-card{background:#0f192c;border:1px solid #1e2c46;border-radius:10px;padding:10px 13px;min-width:0;display:flex;flex-direction:column;}
+.pn-aviso{background:rgba(245,179,1,.1);border:1px solid rgba(245,179,1,.35);color:#f5c542;border-radius:10px;padding:9px 14px;font-size:12.5px;}
+.pn-yi{width:17px;height:17px;stroke:#ffe600;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px;flex:0 0 17px;}
+.pn-vazio{color:#8c9bb3;font-size:13px;padding:22px 6px;text-align:center;display:flex;align-items:center;justify-content:center;flex:1;}
+/* apresentação */
+.pn-hero{display:grid;grid-template-columns:minmax(0,1fr) 360px;min-height:82px;border:1px solid #1e2c46;border-radius:10px;overflow:hidden;background:#0f192c;}
+.pn-hero-l{position:relative;display:flex;align-items:center;padding:12px 24px 12px 28px;} .pn-bar-y{position:absolute;left:0;top:0;bottom:0;width:5px;background:#ffe600;}
+.pn-hero-l h2{margin:0 0 4px;font-size:20px;font-weight:700;font-style:italic;color:#fff;} .pn-hero-l h2 em{font-style:italic;} .pn-hero-l p{margin:0;font-size:12.5px;line-height:1.45;color:#c3cde0;max-width:520px;}
+.pn-hero-art{position:relative;display:flex;align-items:center;overflow:hidden;background:#0d1626;}
+.pn-wh{position:absolute;inset:0;background:linear-gradient(90deg,rgba(15,25,44,0),rgba(15,25,44,.5) 60%,#0f192c 85%),repeating-linear-gradient(90deg,#27385a 0 2px,transparent 2px 38px),repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 18px),linear-gradient(180deg,#31456d,#101b32);}
+.pn-hero-t{position:relative;margin-left:auto;padding:0 28px 0 0;width:200px;} .pn-hero-t b{display:block;font-size:32px;font-weight:800;color:#fff;letter-spacing:.5px;line-height:1.05;} .pn-hero-t small{font-size:12.5px;color:#dbe4f3;}
+.pn-sec{display:flex;align-items:center;gap:8px;margin-top:2px;} .pn-sec h2{margin:0;font-size:14.5px;font-weight:700;color:#fff;} .pn-sec-r{margin-left:auto;display:flex;gap:10px;align-items:center;}
+.pn-info{background:transparent;border:none;color:#9fb0c9;font-size:12px;cursor:pointer;padding:3px 6px;} .pn-info:hover{color:#4fc3ff;}
+.pn-alerta{background:rgba(245,179,1,.12);border:1px solid rgba(245,179,1,.45);color:#f5c542;border-radius:14px;padding:3px 12px;font-size:12px;cursor:pointer;}
+/* indicadores */
+.pn-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+.pn-kpi{position:relative;display:grid;grid-template-columns:54px minmax(0,1fr);column-gap:12px;align-content:start;padding:12px 14px 30px;min-height:122px;background:#0f192c;border:1px solid #1e2c46;border-radius:10px;color:inherit;text-align:left;cursor:pointer;width:100%;}
+.pn-kpi.ok{border-color:#1b6b58;} .pn-kpi.am{border-color:#2c4f8f;} .pn-kpi.bl{border-color:#2c4f8f;} .pn-kpi.rd{border-color:#7d2c2c;}
+.pn-kpi:hover{border-color:#ffe600;} .pn-kpi:focus-visible{outline:2px solid #ffe600;outline-offset:2px;}
+.pn-ic{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;} .pn-ic svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;}
+.pn-ic-ok{background:#12403a;color:#22d3a0;} .pn-ic-au{background:#8a6a12;color:#ffe9a8;} .pn-ic-bl{background:#2a62d6;color:#fff;} .pn-ic-rd{background:#d93a3a;color:#fff;} .pn-ex{font-size:26px;font-weight:800;line-height:1;}
+.pn-ring{display:flex;align-items:flex-start;} .pn-rg{fill:#fff;font-size:15px;font-weight:700;}
+.pn-kb{display:flex;flex-direction:column;gap:2px;min-width:0;} .pn-kt{font-size:13px;font-weight:700;color:#fff;line-height:1.25;} .pn-kv{font-size:27px;font-weight:700;line-height:1.05;color:#fff;letter-spacing:-.4px;} .pn-ks{font-size:12px;color:#c3cde0;line-height:1.35;}
+.pn-d{font-size:11.5px;display:block;margin-top:4px;color:#8c9bb3;} .pn-d b{font-weight:600;} .pn-bom b{color:#22d3a0;} .pn-ruim b{color:#ff6b68;} .pn-d0{color:#8c9bb3;}
+.pn-bar{grid-column:1/-1;display:block;height:6px;border-radius:3px;background:#1d2b46;margin-top:8px;overflow:hidden;} .pn-bar i{display:block;height:100%;background:#22d3a0;border-radius:3px;}
+.pn-meta2{grid-column:1/-1;font-size:11.5px;color:#c3cde0;margin-top:5px;}
+.pn-kl{position:absolute;right:14px;bottom:9px;font-size:12px;color:#4fc3ff;} .pn-kpi:hover .pn-kl{text-decoration:underline;}
+.pn-leg{display:flex;align-items:center;gap:8px;font-size:12px;color:#d3dcea;margin-top:3px;} .pn-leg i{width:8px;height:8px;border-radius:50%;flex:0 0 8px;}
+/* gráfico + visão consolidada */
+.pn-mid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;align-items:stretch;}
+.pn-ch{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;} .pn-ch h3{margin:0;font-size:14px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;} .pn-ch h3 small{font-weight:400;color:#9fb0c9;font-size:11.5px;}
+.pn-hr{display:flex;align-items:center;gap:8px;}
+.pn-ctl{display:flex;gap:8px;align-items:center;flex:0 0 auto;}
+.pn-seg{display:flex;background:#0a1220;border:1px solid #26365a;border-radius:8px;padding:2px;} .pn-seg button{border:none;background:transparent;color:#cdd7e8;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;} .pn-seg button.on{background:#1d4f91;color:#fff;font-weight:600;}
+.pn-seg2{width:100%;margin:4px 0 6px;padding:2px;} .pn-seg2 button{flex:1;padding:4px 8px;} .pn-seg2 button.on{background:#ffe600;color:#14181f;font-weight:700;}
+.pn-ctl select{height:30px;background:#0a1220;border:1px solid #26365a;color:#e8eef8;border-radius:8px;padding:0 8px;font-size:12px;}
+.pn-tot{height:30px;background:#0a1220;border:1px solid #26365a;color:#e8eef8;border-radius:8px;padding:0 12px;font-size:12px;cursor:pointer;} .pn-tot.on{border-color:#4fa3ff;}
+.pn-lg{display:flex;gap:20px;align-items:center;font-size:11.5px;color:#d3dcea;margin:0 0 4px;flex-wrap:wrap;} .pn-lg span{display:flex;align-items:center;gap:7px;} .pn-lg i{width:9px;height:9px;border-radius:50%;} .pn-lg i.dash{width:22px;height:0;border-radius:0;border-top:2px dashed #ffe600;background:none;} .pn-lg2{margin:4px 0 0;}
+.pn-graf .pn-chart{position:relative;flex:1;min-height:170px;} .pn-chart > svg{display:block;position:absolute;inset:0;}
+.pn-ax{fill:#a3b1c8;font-size:11.5px;} .pn-val{fill:#fff;font-size:11.5px;font-weight:700;} .pn-meta{fill:#ffe600;font-size:11px;font-weight:600;}
+.pn-tip{position:absolute;display:none;background:#0a1220;border:1px solid #2b3d62;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;pointer-events:none;z-index:30;white-space:nowrap;box-shadow:0 8px 22px rgba(0,0,0,.5);} .pn-hit{cursor:crosshair;}
+.pn-cons .pn-ch{margin-bottom:0;}
+.pn-cp{margin:0 0 5px;} .pn-cp b{display:block;font-size:13.5px;color:#fff;margin-bottom:2px;} .pn-cp em{font-style:normal;font-size:11px;color:#9fb0c9;display:flex;align-items:center;gap:6px;} .pn-cp em i{width:6px;height:6px;border-radius:50%;background:#6b7a96;} .pn-cp em i.on{background:#22d3a0;}
+.pn-cbs{display:flex;flex-direction:column;gap:5px;flex:1;}
+.pn-cbox{display:flex;align-items:center;gap:8px;flex:1;min-height:36px;padding:3px 8px;border:1px solid #1e2c46;border-radius:8px;background:#0d1626;}
+.pn-cbi{display:flex;color:#9fb0c9;} .pn-cbi svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+.pn-cbt{flex:1;min-width:0;} .pn-cbt small{display:block;font-size:10.5px;color:#c3cde0;line-height:1.2;} .pn-cbt b{font-size:15px;font-weight:700;color:#fff;line-height:1.1;}
+.pn-cd{display:flex;align-items:center;gap:6px;font-size:11px;color:#9fb0c9;text-align:right;max-width:130px;} .pn-cd span{white-space:normal;} .pn-up{color:#22d3a0;font-size:15px;font-weight:700;} .pn-dn{color:#ff6b68;font-size:15px;font-weight:700;} .pn-eq{color:#8c9bb3;font-size:15px;}
+.pn-lnk{background:transparent;border:none;color:#4fc3ff;font-size:12px;cursor:pointer;padding:6px 0 0;text-align:left;} .pn-lnk:hover{text-decoration:underline;}
+.pn-lnk2{background:transparent;border:none;color:#4fc3ff;font-size:12px;cursor:pointer;padding:0;} .pn-lnk2:hover{text-decoration:underline;} .pn-sub-r{align-self:flex-end;margin:-2px 0 0;}
+/* base: 4 cartões */
+.pn-bottom{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr);gap:12px;} .pn-bottom .pn-lnk{margin-top:auto;padding-top:8px;}
+.pn-sub{margin:0 0 4px;font-size:11px;color:#8c9bb3;}
+.pn-ord{background:#0a1220;border:1px solid #26365a;color:#cdd7e8;border-radius:7px;width:26px;height:24px;cursor:pointer;font-size:12px;padding:0;}
+.pn-tb{width:100%;border-collapse:collapse;font-size:12px;} .pn-tb th{font-weight:500;font-size:11px;color:#9fb0c9;text-align:center;padding:4px 4px;border-bottom:1px solid #1e2c46;} .pn-tb td{padding:4px 4px;text-align:center;border-bottom:1px solid #162540;color:#e3eaf6;} .pn-tb .l{text-align:left;} .pn-tb td.ok{color:#22d3a0;font-weight:700;} .pn-tb td.bad{color:#ff6b68;font-weight:700;} .pn-tb tbody tr{cursor:pointer;} .pn-tb tbody tr:hover td{background:rgba(255,255,255,.04);}
+.pn-tend{position:relative;flex:1;min-height:128px;margin-top:2px;}
+.pn-donutw{display:flex;align-items:center;gap:10px;padding:2px 0 0;flex:1;} .pn-donutw svg{width:104px;height:104px;flex:0 0 104px;} .pn-rt{fill:#fff;font-size:26px;font-weight:700;} .pn-rs{fill:#a3b1c8;font-size:12px;}
+.pn-dl{flex:1;min-width:0;border-collapse:collapse;font-size:11.5px;} .pn-dl td{padding:5px 2px;color:#e3eaf6;white-space:nowrap;} .pn-dl td:nth-child(2){text-align:right;font-weight:700;color:#fff;} .pn-dl td span{color:#9fb0c9;font-weight:400;} .pn-dl i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;}
+.pn-nota{font-size:11px;color:#9fb0c9;margin-top:4px;}
+.pn-seg3{margin:2px 0 6px;} .pn-cls{display:flex;flex-direction:column;gap:2px;flex:1;}
+.pn-cl{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #162540;} .pn-cl:last-child{border-bottom:none;}
+.pn-ci{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;flex:0 0 26px;} .pn-ci svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;}
+.pn-clb{flex:1;min-width:0;} .pn-clb small{display:block;font-size:11.5px;color:#d3dcea;} .pn-cl b{font-size:16px;font-weight:700;color:#fff;}
+.pn-mini{display:flex;align-items:center;gap:5px;font-size:11px;color:#d3dcea;margin-top:2px;} .pn-mini i{width:7px;height:7px;border-radius:50%;margin-left:6px;} .pn-mini i:first-child{margin-left:0;}
+@media (max-width:1360px){ .pn-kv{font-size:24px;} .pn-bottom{grid-template-columns:1fr 1fr;} .pn-hero{grid-template-columns:minmax(0,1fr) 300px;} }
+@media (max-width:1180px){ .pn-mid{grid-template-columns:1fr;} .pn-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .pn-cons .pn-cbs{flex-direction:row;flex-wrap:wrap;} .pn-cbox{flex:1 1 45%;} }
+@media (max-width:980px){ .pn-hero{grid-template-columns:1fr;} .pn-hero-art{min-height:80px;} .pn-bottom{grid-template-columns:1fr;} }
+
+</style>
+<script>
+/* =====================================================================
+   REDESIGN DESKTOP — menu lateral, cabeçalho e painel da tela inicial
+   ---------------------------------------------------------------------
+   • Nenhuma regra de negócio/fórmula foi alterada: o painel usa os MESMOS dados
+     calculados por renderInicio() (cumprimento, solicitações, absenteísmo, áreas
+     críticas, série semanal, status por local e eventos do dia).
+   • Menu lateral = espelho dos botões originais (navHome, navChecklist, …): cada
+     item dispara .click() no botão original e copia dele "ativo" e "visível",
+     então abas, permissões (admin) e handlers continuam exatamente os mesmos.
+   • Só existe em desktop. O celular segue 100% com a navegação e a tela atuais.
+   ===================================================================== */
+(function(){
+  'use strict';
+  const KIOSK = (()=>{ const p = new URLSearchParams(location.search); return p.get('tab')==='requests' || p.get('kiosk')==='1'; })();
+  if(KIOSK) return;
+  if(new URLSearchParams(location.search).get('semds')==='1'){ console.warn('[Layout desktop] desligado por ?semds=1'); return; }
+  try{
+  const mqPainel = window.matchMedia('(min-width:769px)');
+  const mqLateral = window.matchMedia('(min-width:900px)');
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  /* Logotipo Mercado Livre (somente a elipse, fundo transparente), embutido e otimizado (~5 KB). */
+  const LOGO_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHAAAABPCAMAAAAEErEBAAADAFBMVEUAAADx9PHxyQrt6vLu0wg4NnLsyCwxKVFNRVBQRzA0NFBLOUxMRmsyKWvQuDPV1+pLODEyKTJEO2xVVVXy9dlURhHr0yy1t83RuEprWE3IxtM3NXM2NjHVxS+vqsrZ5exQORBrWDFvVw7OyepsZ4s4NnPl2vB2ZTCulzIAAH+1pDOMiKrYxxNsZ3OLdy+TlrDGqDLIqEw6OGw6OW1zd43T1tU6OHA5N3NWU1GLh5Oxl01aUjVUVXGpp7Pox0kAAP9GKUxqSQ2MdUrmvDAAAFVyZFA2JxDZxUja0w/q6NmJdhKThi7FutNIKjGHaRE5Q1OHZzKZh1CniDK3xNFDPGlJR2aJZ0+umBRYWIppVnSGenCWlpS0o0trVo51Zg+xtbfJuutTSYd6eK2FepaFeajPuBjxvgrlukk3NQ86OWpoSixzdHTQtmzd9PUwGkypiUtIRlFHQmmVhROZk8WkmbCnmcnHqGVFOWZoSEx/f395g5EtGyw7OztHKxNaUxJkPRBjS22XpLQyHBVIOYaUhWy4pRja0i9VAFVGO1l7dC2FbZikhxmmiWmwk2y6t+bGpBrp0kcAAKoxLnYvLXlCK2lAOm5VVapjOSmDXTKdkymid0awomrNyLQ2LGgyKoc3N1hAPGtYWDFaZ3J/AH93dFynlJW7tDTCmTbDlk3ax2wZFUUcLWw2HXMxLnc2RBs4QSs6SGJCHi5fPz9kO0dva6J/fwB9g6SEaGePecyRl3CdpcGpfCmxqI+1pO+4xbnLnBzBrdTj3dsAAD8fJi8fNVAAVVUyLnorK4I/P1wwMIU/O4AzTEw8QGo+UERVAKpAG0VHP19VVX9TZl1eY4pdcHhVqgB/AABpT4FmZgB/cRmJXlOCX2GCZryIhcafk16Zo5ykeWKgj6ahjMKole2/shq5sUqysZq+0sHCrOXCtbrQ1rPa493/AP/iqiPpt2PlyWbky+L25RL//wD///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU6Is1AAAA/3RSTlMA//////j///7+/v7//v///v7+A//9/////v/Q/v////7+/v//r//+/wL////+/////zBO//9xkP7///7///8B/v7//wP+/v////////7//v////8tFv7///7///////////////////4U/v//////DDD//////xb/Av/+BP79/v7///////8DGP//////////AytR/1ED/f//////Ef8Mbwb/Av///////////3T//f/9CP//Av///////////////wT//wOeLyxF/wo3/AP/IAb///8DAv8F/////////////////////////wH//////wEBAAAAAAAAAAAAAADZdV04AAARCUlEQVR42q1a9X8bWZKXLbfUrW6rW22LmSxZaNmyLckyyZGZ7RhipoDjiTPhySSZ8Exokh3YwR2mpVtmvrvdY2Zm5rt/4Oq97hbYSjYzO/WDPoLW+3Z9C15VvZbJHkpqq6qqpPf/uxdkchJejv6B9N2TVVW1so9NHhOw/vh0fUNTs9drNpsJLPDG621uen7y0TfxBeeq2j8GtKo96PVQQ5NXgOF5plB4HkN7mxp+G91W7bmfDbPqMXh5qqHZi1YlSQqJEUt2amrK5wShKI6maYza3HAUs/9R0drRP08/jzUjWy5c0GodWq220+Xz+UYFGXa5OrUOhwO+dDlJpKv3jUPoPj+KPdGNvvl8M3BIcg6ta3Gxv7//2LFb09PTgUCdJD+Aj9PHjvX3Dw8PuzodDg5hPr9XpOZDwX0SqGwyg8XIzc0nOjtdkXF/nVptDZXvlIre0MbGtenxyKiz84lO0JMnzG9Mgt++/WHwAK4elCO1jk7X6NTL2x/EYoYDXQoFAtiBh6RcYTUYYqnUdma08wkHBdw218tkex7af4DMyWaCpymXyzXc768zHDjQplBguF2AAqQOfm0zAOh4BOzqomieaJ7ECz0Mm7Wyo02gXafjiRfHgcbdLBbj5d6he1K3GerGh4Fb8Nvmp2Cxh1KvwUxz3KZz6q/vxA4oMGUFsn8/WroEcIWoapvh/e+Mdna+AFo2YeM8WPbInvIi7TpHt09tISZ34JXvR5p0iaLIMS0CVpRjcmNYS5Lw/rKs9oGWBAYawFU6F8Fy6jadYrcSmDp1XQzJqVNbWwd2YIrcqutuDbu0WgIpuedBdJ5rJkiXy+evs1ordpApqhCCGDg2DMGP8k146uXxH/xHl+RPub/odIqNu7dcrgs04T0qe/J+eJ+QHfKSWq1z7JWtnjZrKFQIKS4WUqv9/S6to7u7W4NkyOEa/s77MSFkKiQRHMgwn4HMxJvr76fjj2X1ZsrRzWWvfnfr0z3XdRUFgNghdDprYGAREpwzuw9LOGw0bjrAm7djW21tCp0EiODu3fv01tWWgwe1JNFQGvHnZfVgPo4jjeF9d+YNamtvHjDU2xsKWXsM85EWuCCcXDKZGkFeXWpNei7SSvrMN26/EjNYrXAdiNVqVavVhleuhklSZaEYQKwtxSfgUe8kk2FSo+GckYHpvwdSsQvodNdhicDAQMTHaRJJ26C7Ri5I349Yk/7k+sUOzRDlG3gp8J51A/IfpJ3AQP8ixSmVjCecoGhArNodDoDX8k6rydS6Ngv7UIvLtdh/zB8IGFACCQxEIjeceHOaM2GoMkHQ2xpTNJxAW5fT54v0R5D4fM5NiiKZcLC1NZmgyN2ItbJnzKTlsJ6F/7ON+rnDCUoDjkE5M2NjY5mMkRuCXU+joeNwRZlckjKMDC+NptZ9Rk6juXwZ/tR9+fJlDXcmvHZCzwIVprkE2LG+GLG99pCZTODV8H2b9K3RNc8s7OgkSXM0efHiHy3wlUf49UHxAtZti0ZtJjanaeNga3D9pmcBZHZ21nMzeBKYx0T0Nc45Kdq8V/Z/RYQ2k9q4qYgp1q0/uRZmVBoNWCL4t+srlfyqW7jA7rYFPTNpT9DG5thF3Lrdy8v/bLP9cNldAyIx32eaoyje++Un2wsCvoG8kP1uo4QnrsCCR+hbQWyDyyfSShXoh9dgWz2EkmAY2Jw9NglPMqgIJX7EP/WZkkaKb5LlNuV22TOEtuWVf+0ru5/IB+MqlUePDWefiHpUSmJmdXXmVyuJr9rcdnRFtYgglxfesqT74BpHgRkfy3mMl6LeebW6uqys6A+5P5a54yolMI4/6AGOAXOzrPvpv5ipJIJueX79/N+r+3JwIDajljR/+W2J0F8htdl/7BMAS+lnCjIjYT2mib0UHxl5K6jHasndx2eIma/bWHxZKYIkVk1Jp5aQSG0/56Usc3191YIldkp1dV+SVIWX7NgZo6RmJK63i9zJWf0qQ8x8W46vq0a3XBqQNe3T0uanRA99lm8R7r8kXHV1Y1hDJsGF7abWOKlKRyfs+QXZp1dXiJkgoru6BKSIB840ZyRBRVws13qpRJQtNnSRNIZV6bM2vV4fDY8AHlu8pD7IqJigYOAdeNX5JcH0Cd58FCv4SzwXNt1HQSGtDAYZpUoJApouNcp3WtjmUSo9pVYogJe7gySFM1yVrImnkqy89NWCj9Usr65cQX1FOmnqK+EYJxglsWpDSW+HOQo+sDaG45vRtvE7Zn42WFNMJU5JfXlESLDLTz+97GZrdlEOq8pr9B7iCCM6qzyHK8aZGB7LCxxPnAZO6wnmYtBdOh4KPE0MankpIgBxnSdmjheuIhd+k/5c4/7eAkUApzLwUZq/aXOz8qLAlecBC3ytRF4QeWODzGdWjsNGKX7X11gQ9zXu5e/93TdXSFw4QtruONJBkunw2bmlRvuuvFQcVOKeJM/zhuIUfXIf91zh1/VSeOTyTI37X95dW1i5cuW5SkhvXgD00l/qQHvfQarl8NySqZG1CyzYdwEWbIRF32JAOWtbgJQnhofIY4170PZuxklpHn8cyggoG82/Jnvd7Bj6xtWxgRuLF6AWs0DB0mpi75/FS+CJ7MvdtnUIj9a8HWqWT65dpM+fh25vdGzsL8ciLQR4zafMDu72KcN7gZf6Fy9oHRzJzMajtglWXjqo8oBSVsmbnYW8rgq3YuvJ3csnv/nnCzzNOVBZjSqVwDEXQUzKDhGOF+5s9Vy/3tNjiM1vZ5xQKVjIw63Ajdxuz1Gb3w7kxd4iLwgEiG6lBlIRXGSKevgjj6NqDIpqBbQcPT2BfgCsh6hwvHDbYNXp7rW1QccV8Ed8qFpKhJN6VEd8PQrhBVsxi2uZ+4QOa1oScjvsCmlVOmlrjc9CaQJV1QC0DApU9+naDP48YCa20Yt7PCxQEPq03Y/TaydPehiC8Vxy61EB42bl97Ms2xo/ixCRtlFGRXpmwUmgbgyoewBKKKQVhvFhDHgInCZTF+rFfY/Q50ENmso4aYbnVxZWPQyTZgiVimBWB+VlJTI03rWSifBfCb+CIWmaJLP7vjWfq6VxVxWLuDDgaTPHTc0jwHKo1aXGsic25uOOKD1R/XGP6jOqkRGVSskH0Y7RWFLP1sPkW0uNAjrk8o7wHegWdDqxdEevPbFRF4UAZV6SM/qhRi/qzEDLVAvpsdlhw/MQZycaYUsg0BgoHdTXlMh/8onDiUS0UUhmg2THn935L6tVVx7KIZYbTjm1FGH+FGQaniYHrL29FbmOE1/RG9CSQRO+4yDKH2w0DdvFysrKV23sjvSDSLYvxUfSZ/8J0/3fZ4b+9IM2RUHHiEx4exPqYZRpmghac8N6vbeo0a34n4ppB/k3JpxCWLtQ2Hg8wePrvBJKw8LSrAbnT3nZRHxENdf4b2j75M6Pvq+QuBQpi01xDp5oxrsF3X0hYNXt6NkVdZv0rA0VxHZpo221mdyDwTSz5i6omGtsNoFjOyBCNQfF8Luc49bd0I6JQ8o4xAm7xVEzfd5x4x/uCVSL3WD5fsWBl7/ScfOHg/pLE4UxLzet0eHBGinhwP0E16QOQR9XVq4eP7lu1C5e2wgVDVhC6nH6SwCIhlRgREe3dsygKO6aFW2npoaGSGguLglNi7gfNiZVaVtNvptho57fiwqI9omZyis8r3QsTocEOvfnAK+NckPQf8OOXwWcarsd2VRXfrAkkHDggxc7HZTlF+J2EVAMOajBgyfdUutg159Nz0QnBIJXr/A0RbmmQzj4yiVAnSIQ6QQ8sWuDstQxdCYTUxQD7u/qMvgHBpwaj7smn7IheZFQTTFBRGsf2vXkE2e/ODKHdlI5u77CZFPzal3xqKXinmF78/x5mjAfgrYCdTK0dqjDmFJ3lVcUjy4gGt+LWJignoVuTKz0WVsyHg+n08nBmh+9+mof1jE+8rvf+j6ErG2WNo5BXpZWERSs0BlSWe6ygxfrUln7UTM5dISeShkUBWBCwIasfidF7jtxIh4WNzo7a2LZiSiZjppMc3PoLh4BVhNQPw6eCHNcZr4N4r28cPyh60lN0UPntWgz/EOxWeO53+r4ylSqR5cDzLmQ2j+KJg0Wek4EtNsfQSGQDutN8bDQZNi/H7aQJJqrDgd6cLYuuHFdz3yG7NBoaUlBNIv10h1HlMy+eat4Y2i6JRm0yz8MiBoN9ON2dmLC/giSxktvMVF3dGZmVUCMQ5Hc7XD1X8P5uIgoK+DRUDVBWmtvzzX4BP34kUoyE7DqxOkW7BzS8KyrLjV21Yg25aVLh39/4pEyAAS7fTHKuo+vQKijHv8wRxoj4wF1uZQ6RR0rdNbAjRZOqeSIwsFClezzPHyponwBq6KiYNYlBYgBNg+qxZhNWEYu4cTDftuTjsphh59h1my2E0nKEUnF1AqFlDqlgWZbTyDSYrFoKBKyWsF4aE+VlwFv11ARv7rEKBS2K4M/4tI6LBpV0A1WRDZMH4eWdHmdZxZuLtAOl99g3TnRVCgM4J+USmX5OSB0r6xgrvjvsA+T0K5wlM+vVpQXWUEyap0/kslS3GxSb9LbgmkU/tETJzx0Bz07e2b0llqxC64N3MVJWVRKC4Wqp8d2zYUsGtAxsx1QWxX5UWUeESqeU2NOyrnv6r7DWRLNyIzZrJHadE5ltqFy2XmLbW1bqQwFFZnlCxSxezJUJXuWoDRKJZQHvpRBbRVNWDj7RZh142gMqtU6fVmf0wlv0Lgf36HAihRNYPf/PHXbyKloleYgReQjIi9PyhoAsRKEzg741aFyyV1zg2ecFDem+9HoPZJKpcYj/cPDx8AEirxvCtejYIptTxnpI0peZdGqSuGh4HiWIGllZSVvoXwvBYThetfu8fbG3bt1dXUGqCnVSDYUOtGfxdEsSjTl6tjLZzga9bB0af0EOzZgRAKMjCpKtVA17nIgHKVQakqzZwlMQAXEnlgq8uKZjg4INKipidLTS9FzzAxZqUQXgr9CHKNZ5PV8Wrz/WYJQC6IJdciqnh8z0h0IDyK7lL8UIr7u5WmN0M9zlKsf1ATIgjn6DpDyXBlYUR6CUrM3tHHt2KKTpJ9DKwAelE31sk886BDha58nSMqiVIKemoPgjJnteVBUodDtBi2okhC/VrU64H9pwNfCacARVMAmwBHNrz/4fAaSAdBKfUGF/mKxWGj6TDYynqpTG3oQrKI0s/vVBwxbp1JjEOYUrUKeTkB2ATbNDT/9cOY3ZW82EQxJfPazv6hSwZ876E2nb/FPBvz+QB3YVJHPssKBCfjp3Wn/eGbKaLwILqesfO211yorlSO/MQLqnZZ98qefeEGKrf8JwYyMgIIAqFQOcY6DB7U+X2RgLOUHXAysVqOjkhT6Yrx/2LnJDWmwnyD1KsF4AAfWe8jjLjDyM16CobQHNdj2SpSf0MC7BYvT6fT5fFl8MksJgkMOkJ4DZ9EMUeiw1NvwwDOZXQdssgYveA9Fo0wA7iaIsoRowKlVBFbsc58DA9AcOhH2NlTJ2j/MwWzt2+KRJcnREphKWrhI0G8E/l6J2BdOgidlD8tmQTaH+zvU5CV4KIUhUCzo4GeHcsgZ4U7wmZCFanEmSBrgzE2T4oH1hz52Riaob8KH3CRpwUKr6Dy18I5GsXMQfIpqSTAIrXnyXO5Jg494sP61evzMAM/zJJkQDvFbWrAL4fP8bDaRIEkGPz3wxiSaT/5szyvUonN52d76pmbxQQV8lpHAAjjoWQXhoYGmyb34kYaP4ZGMWuHpCNnpSfQohvQghvQ4hre5qeHX954TKqOP7QGQ9qqqHFFH9z766OSjWCb35gu/qodk8v8B4hcuK95NYXsAAAAASUVORK5CYII=';
+
+  const IC = {
+    home:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h5v-6h4v6h5v-9.5"/>',
+    clip:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5h6V7H9z"/><path d="M8.5 12h7M8.5 16h5"/>',
+    bell:'<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    file:'<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h6"/>',
+    users:'<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 14.8c2.2.5 3.5 2.3 3.5 5.2"/>',
+    cal:'<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/><path d="M8 14h2M12 14h2M16 14h.01M8 17h2M12 17h2"/>',
+    user:'<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>',
+    clock:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    grid:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/>',
+    sliders:'<path d="M5 6h6M15 6h4M5 12h2M11 12h8M5 18h9M18 18h1"/><circle cx="13" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
+    gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 14a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V20a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H20a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    chev:'<path d="m9 6 6 6-6 6"/>', down:'<path d="m6 9 6 6 6-6"/>', arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+    check:'<circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16 9.6"/>', warn:'<path d="M12 4 3 20h18z"/><path d="M12 10v4.5M12 17.4v.1"/>',
+    alert:'<path d="M12 8v5M12 16.5v.1"/>', chart:'<path d="M5 20V10M11 20V5M17 20v-7"/>', doc:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+    bulb:'<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.7.6 1 1.3 1 2.1h5c0-.8.3-1.5 1-2.1A6 6 0 0 0 12 3z"/>',
+    pin:'<path d="M12 21s-6-5.6-6-10.5a6 6 0 0 1 12 0C18 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/>',
+    target:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1"/>'
+  };
+  const svg = (k, cls) => `<svg class="${cls||'ds-i'}" viewBox="0 0 24 24" aria-hidden="true">${IC[k]||''}</svg>`;
+
+  const estado = { pendentes:null };
+  window.dsDesktopAtivo = () => mqPainel.matches && !document.body.classList.contains('kiosk') && !document.body.classList.contains('checklist-mode');
+  /* bandeira simples que os ajustes de desempenho consultam: só vale no notebook/desktop (≥769px); no celular é sempre falsa */
+  window.__dsDesk = !!mqPainel.matches;
+  (mqPainel.addEventListener ? mqPainel.addEventListener('change', e=>{ window.__dsDesk = !!e.matches; }) : mqPainel.addListener(e=>{ window.__dsDesk = !!e.matches; }));
+
+  /* ───────────── MENU LATERAL ───────────── */
+  const ITENS = [['navHome','Início','home'],['navChecklist','Plano de Limpeza','clip'],['navRequests','Solicitações','bell'],['navReport','Relatório','file'],['navEfetivo','Efetivo','users'],['nav52','Plano 52 Sem.','cal'],['navUsers','Usuários','user'],['navHistorico','Histórico','clock'],['navAreas','Áreas','grid'],['navDim','Dimensionamento','sliders']];
+  let side = null;
+  function logoHtml(){ return `<img src="${LOGO_URL}" alt="Mercado Livre" width="56" height="39" decoding="async">`; }
+  function construirLateral(){
+    if(side || !document.querySelector('.mainnav')) return;
+    side = document.createElement('aside'); side.id = 'dsSide'; side.setAttribute('aria-label','Navegação principal');
+    side.innerHTML = `<div class="ds-brand">${logoHtml()}</div>` +
+      ITENS.map(([id,rot,ic])=>`<button type="button" class="ds-item" data-src="${id}" style="display:none">${svg(ic)}<span>${rot}</span>${id==='navRequests'?'<em class="ds-badge" id="dsBadge">0</em>':''}</button>`).join('') +
+      `<div class="ds-sep"></div><button type="button" class="ds-item" data-src="navAdmin" style="display:none">${svg('gear')}<span data-r>Administração</span><i class="ds-on-dot"></i>${svg('chev','ds-chev')}</button>` +
+      `<div class="ds-foot"><i></i><span>Juntos por<br>um ambiente<br>melhor.</span></div>`;
+    document.body.appendChild(side);
+    side.addEventListener('click', e=>{
+      const b = e.target.closest('.ds-item'); if(!b) return;
+      const src = document.getElementById(b.dataset.src); if(src) src.click();
+      setTimeout(sincronizar, 60);
+    });
+    const nav = document.querySelector('.mainnav');
+    new MutationObserver(sincronizar).observe(nav, {subtree:true, attributes:true, attributeFilter:['class','style'], childList:true, characterData:true});
+    sincronizar();
+  }
+  function sincronizar(){
+    if(!side) return;
+    side.querySelectorAll('.ds-item').forEach(b=>{
+      const src = document.getElementById(b.dataset.src);
+      const visivel = !!src && getComputedStyle(src).display !== 'none';
+      b.style.display = visivel ? '' : 'none';
+      b.classList.toggle('active', !!src && src.classList.contains('active'));
+      if(b.dataset.src==='navAdmin') b.classList.add('adm');
+      if(b.dataset.src==='navAdmin' && src){ const r = b.querySelector('[data-r]'); if(r) r.textContent = 'Administração'; b.title = /sair/i.test(src.textContent) ? 'Modo administrador ativo — clique para sair' : 'Entrar no modo administrador'; }
+    });
+    const sep = side.querySelector('.ds-sep'); if(sep) sep.style.display = '';
+    atualizarBadge();
+  }
+  function atualizarBadge(){
+    const b = document.getElementById('dsBadge'); if(b){ b.textContent = estado.pendentes==null ? '' : String(estado.pendentes); b.style.display = estado.pendentes==null ? 'none' : ''; }
+    const bell = document.getElementById('dsBell'); if(bell){ bell.classList.toggle('on', (estado.pendentes||0) > 0); bell.title = estado.pendentes ? (estado.pendentes+' solicitação(ões) pendente(s)') : 'Nenhuma solicitação pendente'; }
+  }
+  let ultimaBusca = 0;
+  async function buscarPendentes(forcar){
+    if(!currentUser || (!forcar && Date.now()-ultimaBusca < 60000)) return;
+    ultimaBusca = Date.now();
+    try{ const r = await inicioSolicitacoes(); if(r){ estado.pendentes = r.qtd; atualizarBadge(); } }catch(e){}
+  }
+
+  /* ───────────── CABEÇALHO (bell + usuário) ───────────── */
+  const PERFIL = {admin:'Administrador', supervisor:'Supervisor', operador:'Operador'};
+  function melhorarCabecalho(){
+    const tc = document.getElementById('topControls'); if(!tc) return;
+    if(!document.body.classList.contains('ds-on')) return;
+    if(!document.getElementById('dsBell')){
+      const b = document.createElement('button'); b.type='button'; b.id='dsBell'; b.setAttribute('aria-label','Solicitações pendentes');
+      b.innerHTML = svg('bell','') + '<i></i>'; tc.appendChild(b);
+      b.addEventListener('click', ()=>{ const s = document.getElementById('navRequests'); if(s){ reqTab='track'; reqSubTab='pendentes'; s.click(); } });
+    }
+    const pill = tc.querySelector('#btnChangePin') ? tc.querySelector('#btnChangePin').parentElement : null;
+    if(pill && !pill.classList.contains('ds-user') && currentUser){
+      const nome = String(currentUser.nome||''), perfil = PERFIL[currentUser.perfil] || (isAdmin?'Administrador':'Usuário');
+      const keep = [pill.querySelector('#btnChangePin'), pill.querySelector('#btnLogoutUser')];
+      pill.removeAttribute('style'); pill.className = 'ds-user';
+      pill.innerHTML = `<span class="ds-av"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7z"/></svg></span><span class="ds-un"><b>${esc(nome)}</b><small>${esc(perfil)}</small></span>${svg('down','ds-uc')}<span class="ds-umenu"><button type="button" data-a="pin">Alterar PIN</button><button type="button" data-a="sair">Sair</button></span>`;
+      keep.forEach(k=>{ if(k){ pill.appendChild(k); } });
+      pill.addEventListener('click', e=>{
+        const a = e.target.closest('[data-a]');
+        const menu = pill.querySelector('.ds-umenu');
+        if(a){ menu.classList.remove('open'); const alvo = pill.querySelector(a.dataset.a==='pin' ? '#btnChangePin' : '#btnLogoutUser'); if(alvo) alvo.click(); e.stopPropagation(); return; }
+        menu.classList.toggle('open');
+      });
+    }
+    tc.querySelectorAll('input[type=date]').forEach(inp=>{
+      if(inp.parentElement.classList.contains('ds-dp')) return;
+      const DS=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'], MS=['jan.','fev.','mar.','abr.','mai.','jun.','jul.','ago.','set.','out.','nov.','dez.'];
+      const fmt = v => { const p = String(v||'').split('-').map(Number); if(p.length<3||!p[0]) return 'Selecionar data'; const d = new Date(p[0],p[1]-1,p[2]); return DS[d.getDay()]+', '+String(p[2]).padStart(2,'0')+' de '+MS[p[1]-1]+' de '+p[0]; };
+      const wrap = document.createElement('label'); wrap.className = 'ds-dp';
+      const lab = document.createElement('span'); lab.textContent = fmt(inp.value);
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.innerHTML = svg('cal',''); wrap.appendChild(lab); wrap.insertAdjacentHTML('beforeend', svg('down','ds-dp-c')); wrap.appendChild(inp);
+      ['input','change'].forEach(ev=>inp.addEventListener(ev, ()=>{ lab.textContent = fmt(inp.value); }));
+      wrap.addEventListener('click', ()=>{ try{ inp.showPicker && inp.showPicker(); }catch(e){} });
+    });
+    atualizarBadge();
+  }
+  document.addEventListener('click', e=>{ if(!e.target.closest('.ds-user')) document.querySelectorAll('.ds-umenu.open').forEach(m=>m.classList.remove('open')); });
+
+  function aplicarModo(){
+    const lateral = mqLateral.matches && !document.body.classList.contains('kiosk') && !document.body.classList.contains('checklist-mode') && typeof currentUser!=='undefined' && !!currentUser;
+    document.body.classList.toggle('ds-on', lateral);
+    if(lateral){ construirLateral(); sincronizar(); melhorarCabecalho(); }
+  }
+  const _rtc = renderTopControls;
+  renderTopControls = function(){ const r = _rtc.apply(this, arguments); try{ aplicarModo(); }catch(e){ console.warn('[Layout desktop]', e); } try{ if(window.dsPeriodoHeader) window.dsPeriodoHeader(); }catch(e){ console.warn('[Período]', e); } return r; };
+  const reagir = ()=>{ aplicarModo(); if(typeof section!=='undefined' && section==='home' && currentUser){ renderTopControls(); renderInicio(); } };
+  [mqPainel, mqLateral].forEach(m=>{ (m.addEventListener ? m.addEventListener('change', reagir) : m.addListener(reagir)); });
+  window.dsBuscarPendentes = buscarPendentes;
+  /* chamado pela lista viva de solicitações (módulo de desempenho): o selo acompanha em tempo real, sem nova leitura */
+  window.dsAtualizarPendentes = ()=>{ try{ if(typeof _requests!=='undefined' && _reqLoaded){ estado.pendentes = _requests.filter(r=>r.status==='aberta'||r.status==='andamento').length; atualizarBadge(); } }catch(e){} };
+
+  /* utilidades compartilhadas com o painel inicial (módulo "PAINEL INICIAL") */
+  window.dsUI = {svg, esc, IC, estado, atualizarBadge};
+
+  const css = document.getElementById('ds-estilo');
+  aplicarModo();
+  }catch(erro){
+    document.body.classList.remove('ds-on'); window.dsDesktopAtivo = () => false;
+    console.error('[Layout desktop] desativado por erro (o sistema segue com o layout anterior):', erro);
+  }
+})();
+</script>
+
+<script>
+/* =====================================================================
+   PAINEL INICIAL (desktop) — dashboard gerencial por PERÍODO
+   ---------------------------------------------------------------------
+   Fontes (as mesmas do restante do sistema; nada é estimado):
+     • Cumprimento ....... checklist:{dia} + regras do Plano de Limpeza (inicioClassifica, a mesma do Início/Relatório):
+                           realizadas = no horário + com atraso ÷ previstas com prazo vencido (total − pendentes).
+     • Absenteísmo ....... efetivo:{dia}: faltas ÷ previsto (previsto pela vigência do Dimensionamento; faltas = max(0, previsto − presentes)).
+     • Cobertura ......... horas de posto cobertas ÷ horas necessárias (12 h por posto/turno na escala 12x36), por turno T1/T2,
+                           limitada ao previsto — um turno com falta não é "compensado" por excesso em outro.
+     • Solicitações ...... requests (status mutuamente exclusivos: pendente=aberta · em andamento · concluída; excluídas ficam de fora),
+                           contadas pela data de criação.
+   Acumulados (mês, ano, histórico) = SOMA de numeradores e denominadores diários — nunca média de percentuais.
+   Meses encerrados são gravados uma única vez em  consolidado/AAAA-MM  (somente leitura depois), preservando o histórico.
+   Diagnóstico: ?semds=1 desliga este painel.
+   ===================================================================== */
+(function(){
+  'use strict';
+  const qs = new URLSearchParams(location.search);
+  if(qs.get('tab')==='requests' || qs.get('kiosk')==='1' || qs.get('semds')==='1') return;
+  try{
+  const UI = window.dsUI; if(!UI) return;
+  const {svg, esc} = UI;
+  const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const MES3 = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const CP = '#22d3a0', CB = '#2f9bff', CR = '#ff5a5a', CY = '#ffe600';
+
+  /* ───────── utilidades ───────── */
+  const hojeD = () => inicioDia(p52Today());
+  const ymKey = (a,m) => a+'-'+String(m+1).padStart(2,'0');
+  const ultDia = (a,m) => new Date(a,m+1,0).getDate();
+  const fmtDM = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
+  const parseDs = ds => { const [y,m,d] = ds.split('-').map(Number); return new Date(y,m-1,d); };
+  const grp = k => window.efDim ? window.efDim.grupoManha(k) : ((k==='T1D'||k==='T2D') ? 'T1' : 'T2');
+  const A0 = () => ({total:0, ontime:0, late:0, notdone:0, pending:0});
+  const addA = (a,b) => { a.total+=b.total; a.ontime+=b.ontime; a.late+=b.late; a.notdone+=b.notdone; a.pending+=b.pending; return a; };
+  const E0 = () => ({prev:0, falt:0, cov:0, pres:0, lanc:0});
+  const addE = (a,b) => { a.prev+=b.prev; a.falt+=b.falt; a.cov+=b.cov; a.pres+=b.pres; a.lanc+=b.lanc; return a; };
+  const baseA = a => a.total - a.pending, realA = a => a.ontime + a.late;
+  const pctA = a => baseA(a) > 0 ? Math.round(realA(a)/baseA(a)*100) : null;
+  const pctAbs = e => e.prev > 0 ? e.falt/e.prev*100 : null;
+  const pctCob = e => e.prev > 0 ? Math.round(e.cov/e.prev*100) : null;
+  const nf = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  const dec1 = v => (Math.round(v*10)/10).toFixed(1).replace('.',',');
+  const sinal = (v,u,d) => (v>0?'+':(v<0?'−':''))+(d? dec1(Math.abs(v)) : Math.abs(v))+(u||'');
+
+  /* ───────── agregação diária ───────── */
+  function calcDia(d, chk, ef){
+    const ds = dateStr(d), hojeDs = dateStr(hojeD()), agora = inicioAgoraMs();
+    const g = {T1:A0(), T2:A0()}, areas = new Map();
+    getLocationsForDate(d).forEach(loc=>activeTurns(d).forEach(t=>{
+      const n = resolveFreq(loc, t.key, d), gr = grp(t.key); let A = areas.get(loc.name); if(!A){ A = A0(); areas.set(loc.name, A); }
+      for(let i=0;i<n;i++){
+        const c = inicioClassifica(loc, t.key, i, d, getEntry(chk, loc.name+'|'+t.key+'|'+i), agora, hojeDs);
+        g[gr].total++; g[gr][c]++; A.total++; A[c]++;
+      }
+    }));
+    const e = {T1:E0(), T2:E0()};
+    (ef._turnos || turnosEfetivoDia(d).map(t=>t.key)).forEach(tk=>{
+      if(!Array.isArray(ef[tk])) return;
+      const p = efPrevistoReg(ef, tk, ds), n = ef[tk].length, E = e[grp(tk)];
+      E.prev += p; E.falt += Math.max(0, p-n); E.cov += Math.min(n, p); E.pres += n; E.lanc++;
+    });
+    return {ds, T1:g.T1, T2:g.T2, e, areas};
+  }
+  const lerRaw = (pref, ds) => withTimeout(fbRoot.child(encodeKey(pref+ds)).get(), 20000).then(s=>{ if(!s.exists()) return {}; const v = s.val(); return typeof v==='string' ? JSON.parse(v) : v; });
+  const diasDoMes = (a,m,reg) => { const hoje = hojeD(), out = []; for(let i=1;i<=ultDia(a,m);i++){ const d = new Date(a,m,i); if(d>hoje) break; if(dateStr(d) < reg) continue; out.push(d); } return out; };
+  const mesFechado = (a,m) => { const lim = hojeD(); lim.setDate(lim.getDate()-1); return new Date(a,m,ultDia(a,m)) < lim; };
+
+  function montarMes(a, m, dias){
+    const areas = new Map();
+    dias.forEach(d=>d.areas.forEach((A,nome)=>{ let X = areas.get(nome); if(!X){ X = A0(); areas.set(nome, X); } addA(X, A); }));
+    return {a, m, ym:ymKey(a,m), dias:dias.map(d=>({ds:d.ds, T1:d.T1, T2:d.T2, e:d.e})), areas};
+  }
+  /* snapshot compacto de mês encerrado (consolidado/AAAA-MM) */
+  const encA = a => [a.total,a.ontime,a.late,a.notdone,a.pending], decA = v => ({total:v[0],ontime:v[1],late:v[2],notdone:v[3],pending:v[4]});
+  const encE = e => [e.prev,e.falt,e.cov,e.pres,e.lanc], decE = v => ({prev:v[0],falt:v[1],cov:v[2],pres:v[3],lanc:v[4]});
+  function codificar(mes){
+    return {v:1, ym:mes.ym, geradoEm:Date.now(),
+      dias:mes.dias.map(d=>({d:d.ds, a:encA(d.T1), b:encA(d.T2), e:encE(d.e.T1), f:encE(d.e.T2)})),
+      areas:[...mes.areas.entries()].map(([n,A])=>[n,...encA(A)])};
+  }
+  function decodificar(a, m, s){
+    const areas = new Map(); (s.areas||[]).forEach(r=>areas.set(r[0], decA(r.slice(1))));
+    return {a, m, ym:ymKey(a,m), areas, dias:(s.dias||[]).map(d=>({ds:d.d, T1:decA(d.a), T2:decA(d.b), e:{T1:decE(d.e), T2:decE(d.f)}}))};
+  }
+
+  const cacheMes = new Map();
+  window.dsInvalidarMes = () => { const hoje = hojeD(); cacheMes.forEach((v,k)=>{ if(!mesFechado(+k.slice(0,4), +k.slice(5,7)-1)) cacheMes.delete(k); }); };
+  function mesAgg(a, m, reg){
+    const key = ymKey(a,m)+'|'+reg, c = cacheMes.get(key), fech = mesFechado(a,m);
+    if(c && (fech || Date.now()-c.t < 60000)) return c.p;
+    const p = fech ? mesEncerrado(a,m,reg) : mesVivo(a,m,reg);
+    cacheMes.set(key, {t:Date.now(), p}); p.catch(()=>cacheMes.delete(key)); return p;
+  }
+  async function mesVivo(a, m, reg){
+    const dias = diasDoMes(a,m,reg); if(!dias.length) return montarMes(a,m,[]);
+    const [chk, efs] = await Promise.all([plLerChecklists(dias), Promise.all(dias.map(d=>loadEfetivo(dateStr(d))))]);
+    return montarMes(a, m, dias.map((d,i)=>calcDia(d, chk[dateStr(d)]||{}, efs[i]||{})));
+  }
+  /* TODOS os consolidados dos meses encerrados numa única leitura (pequenos: ~10 KB por mês) */
+  let consolMap = null;
+  const lerConsolidados = () => consolMap || (consolMap = withTimeout(fbRoot.child('consolidado').get(), 15000).then(s=>s.val() || {}).catch(()=>({})));
+  async function mesEncerrado(a, m, reg){
+    try{
+      const snap = (await lerConsolidados())[ymKey(a,m)];
+      if(snap && snap.v === 1) return decodificar(a, m, snap);
+    }catch(e){ /* sem snapshot (ou sem permissão): calcula */ }
+    const dias = diasDoMes(a,m,reg); if(!dias.length) return montarMes(a,m,[]);
+    // leitura direta (sem cache e com erro propagado): um snapshot NUNCA é gravado a partir de dado incompleto
+    const [chk, efs] = await Promise.all([Promise.all(dias.map(d=>lerRaw('checklist:', dateStr(d)))), Promise.all(dias.map(d=>lerRaw('efetivo:', dateStr(d))))]);
+    const mes = montarMes(a, m, dias.map((d,i)=>calcDia(d, chk[i]||{}, efs[i]||{})));
+    try{ const r = await fbRoot.child('consolidado/'+mes.ym).transaction(cur => cur === null ? codificar(mes) : undefined); if(r && r.committed){ (await lerConsolidados())[mes.ym] = codificar(mes); } }catch(e){ console.info('[Painel] consolidado não gravado (sem permissão?):', e && e.message); }
+    return mes;
+  }
+
+  /* ───────── período ───────── */
+  const periodoAtual = () => window.__dsPeriodo || (()=>{ const h = hojeD(); return {t:'mes', a:h.getFullYear(), m:h.getMonth()}; })();
+  let regIni = null;                                           // 1º dia com registro do Plano de Limpeza
+  const mesesDisp = () => {
+    const h = hojeD(), out = []; let a = h.getFullYear(), m = h.getMonth();
+    const r = regIni && regIni !== '9999-12-31' ? parseDs(regIni) : null;
+    while(true){ out.push({a,m}); if(!r || (a===r.getFullYear() && m===r.getMonth())) break; m--; if(m<0){ m=11; a--; } if(out.length>120) break; }
+    return out;
+  };
+  const anosDisp = () => [...new Set(mesesDisp().map(x=>x.a))];
+  function descPeriodo(p, ate){
+    const h = hojeD();
+    if(p.t==='mes'){ const atual = p.a===h.getFullYear() && p.m===h.getMonth(); return {titulo:MESES[p.m]+'/'+p.a, estado: atual ? 'Mês em andamento' : 'Fechamento mensal', verde: atual}; }
+    if(p.t==='ano') return {titulo:'Acumulado de '+p.a, estado:'Acumulado até '+(ate||fmtBR(h)), verde:false};
+    return {titulo:'Histórico completo', estado: ate ? 'Até '+ate : 'Todos os meses disponíveis', verde:false};
+  }
+  function mesesDoPeriodo(p){
+    const h = hojeD(), r = regIni && regIni !== '9999-12-31' ? parseDs(regIni) : null; const out = [];
+    const ok = (a,m) => !r || a>r.getFullYear() || (a===r.getFullYear() && m>=r.getMonth());
+    if(p.t==='mes'){ if(ok(p.a,p.m)) out.push({a:p.a,m:p.m}); }
+    else if(p.t==='ano'){ const ultimo = p.a===h.getFullYear() ? h.getMonth() : 11; for(let m=0;m<=ultimo;m++) if(ok(p.a,m)) out.push({a:p.a,m}); }
+    else { for(const x of mesesDisp().reverse()) out.push(x); }
+    return out;
+  }
+  const mesAnterior = (a,m) => m===0 ? {a:a-1,m:11} : {a,m:m-1};
+
+  /* ───────── seleção de período no cabeçalho ───────── */
+  window.dsPeriodoHeader = function(){
+    const tc = document.getElementById('topControls'); if(!tc) return;
+    const ativo = section==='home' && window.dsDesktopAtivo && window.dsDesktopAtivo() && !!currentUser;
+    document.body.classList.toggle('ds-periodo', ativo);
+    const velho = document.getElementById('dsPeriodo'); if(velho) velho.remove(); const velhoP = document.getElementById('dsPeriodoProx'); if(velhoP) velhoP.remove();
+    if(!ativo) return;
+    const p = periodoAtual(), d = descPeriodo(p, window.__dsAte);
+    const box = document.createElement('div'); box.id = 'dsPeriodo'; box.className = 'pn-sel';
+    box.innerHTML = `<button type="button" class="pn-sel-b" aria-haspopup="listbox" aria-expanded="false">${svg('cal','')}<span class="pn-sel-t"><small>Período de análise</small><b>${esc(d.titulo)}</b><em><i class="${d.verde?'on':''}"></i>${esc(d.estado)}</em></span>${svg('down','pn-sel-c')}</button><div class="pn-sel-m" role="listbox"></div>`;
+    tc.insertBefore(box, tc.firstChild);
+    const prox = document.createElement('button'); prox.type = 'button'; prox.id = 'dsPeriodoProx'; prox.className = 'pn-prox'; prox.title = 'Ir para o mês seguinte'; prox.setAttribute('aria-label','Mês seguinte'); prox.innerHTML = svg('chev','');
+    const hh = hojeD(); const noAtual = p.t!=='mes' || (p.a===hh.getFullYear() && p.m===hh.getMonth()); prox.disabled = noAtual;
+    prox.onclick = () => { if(prox.disabled) return; const n = p.m===11 ? {a:p.a+1,m:0} : {a:p.a,m:p.m+1}; window.__dsPeriodo = {t:'mes', a:n.a, m:n.m}; renderInicio(); };
+    box.insertAdjacentElement('afterend', prox);
+    const menu = box.querySelector('.pn-sel-m'), btn = box.querySelector('.pn-sel-b');
+    const igual = x => p.t===x.t && p.a===x.a && p.m===x.m;
+    const itens = [];
+    mesesDisp().forEach(x=>itens.push({t:'mes', a:x.a, m:x.m, rot:MESES[x.m]+'/'+x.a}));
+    itens.push({sep:true});
+    anosDisp().forEach(a=>itens.push({t:'ano', a, rot:'Acumulado de '+a}));
+    itens.push({t:'hist', rot:'Histórico completo'});
+    menu.innerHTML = itens.map((x,i)=>x.sep ? '<div class="pn-sel-sep"></div>' : `<button type="button" role="option" data-i="${i}" class="${igual(x)?'sel':''}">${esc(x.rot)}</button>`).join('');
+    btn.onclick = e => { e.stopPropagation(); const ab = menu.classList.toggle('open'); btn.setAttribute('aria-expanded', ab); };
+    menu.onclick = e => { const b = e.target.closest('[data-i]'); if(!b) return; const x = itens[+b.dataset.i]; window.__dsPeriodo = {t:x.t, a:x.a, m:x.m}; menu.classList.remove('open'); window.__dsFiltro = window.__dsFiltro || 'ALL'; renderInicio(); };
+  };
+  document.addEventListener('click', e=>{ if(!e.target.closest('#dsPeriodo')){ const m = document.querySelector('#dsPeriodo .pn-sel-m.open'); if(m) m.classList.remove('open'); } });
+  // abrir a página inicial sempre volta para o mês/ano atuais
+  document.addEventListener('click', e=>{ if(e.target.closest && e.target.closest('#navHome')) window.__dsPeriodo = null; }, true);
+
+  /* ───────── gráficos (SVG) ───────── */
+  function grafico(pts, W, H){
+    const m = {l:46, r:18, t:26, b:34}, iw = W-m.l-m.r, ih = H-m.t-m.b, n = pts.length;
+    const x = i => m.l + (i+.5)*iw/n, y = v => m.t + ih - v/100*ih;
+    let g = '';
+    [0,25,50,75,100].forEach(v=>{ g += `<line x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}" stroke="#22314d" stroke-dasharray="3 4"/><text x="${m.l-9}" y="${y(v)+4}" text-anchor="end" class="pn-ax">${v}%</text>`; });
+    g += `<line x1="${m.l}" x2="${W-m.r}" y1="${y(GOAL_PCT)}" y2="${y(GOAL_PCT)}" stroke="${CY}" stroke-width="1.4" stroke-dasharray="6 5"/><text x="${W-m.r}" y="${y(GOAL_PCT)-6}" text-anchor="end" class="pn-meta">Meta ${GOAL_PCT}%</text>`;
+    const seg = (campo) => { const out = []; let at = []; pts.forEach((p,i)=>{ const v = p[campo] ? p[campo].pct : null; if(v==null){ if(at.length) out.push(at); at = []; } else at.push([x(i), y(v), i]); }); if(at.length) out.push(at); return out; };
+    const sc = seg('cump'), sb = seg('cob');
+    g += `<defs><linearGradient id="pnGr" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${CP}" stop-opacity=".30"/><stop offset="1" stop-color="${CP}" stop-opacity=".02"/></linearGradient></defs>`;
+    sc.forEach(s=>{ if(s.length>1) g += `<path d="M${s[0][0]},${y(0)} L${s.map(q=>q[0]+','+q[1]).join(' L')} L${s[s.length-1][0]},${y(0)} Z" fill="url(#pnGr)"/>`; });
+    sb.forEach(s=>{ if(s.length>1) g += `<polyline fill="none" stroke="${CB}" stroke-width="2.4" stroke-linejoin="round" points="${s.map(q=>q[0]+','+q[1]).join(' ')}"/>`; });
+    sc.forEach(s=>{ if(s.length>1) g += `<polyline fill="none" stroke="${CP}" stroke-width="2.4" stroke-linejoin="round" points="${s.map(q=>q[0]+','+q[1]).join(' ')}"/>`; });
+    const passo = n>16 ? Math.ceil(n/12) : 1;
+    pts.forEach((p,i)=>{
+      const vc = p.cump ? p.cump.pct : null, vb = p.cob ? p.cob.pct : null;
+      const lab = (v, cor, acima) => `<text x="${x(i)}" y="${acima ? y(v)-10 : y(v)+19}" text-anchor="middle" class="pn-val">${v}%</text>`;
+      if(vc!=null && vb!=null){ const cumpMaior = vc>=vb; g += lab(vc, CP, cumpMaior) + lab(vb, CB, !cumpMaior); }
+      else if(vc!=null) g += lab(vc, CP, true); else if(vb!=null) g += lab(vb, CB, true);
+      if(vb!=null) g += `<circle cx="${x(i)}" cy="${y(vb)}" r="4.5" fill="#0d1626" stroke="${CB}" stroke-width="2.4"/>`;
+      if(vc!=null) g += `<circle cx="${x(i)}" cy="${y(vc)}" r="4.5" fill="#0d1626" stroke="${CP}" stroke-width="2.4"/>`;
+      if(i%passo===0) g += `<text x="${x(i)}" y="${H-10}" text-anchor="middle" class="pn-ax">${esc(p.label)}</text>`;
+      g += `<rect class="pn-hit" data-i="${i}" x="${x(i)-iw/n/2}" y="${m.t-6}" width="${iw/n}" height="${ih+m.b+6}" fill="transparent"/>`;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Evolução do cumprimento do plano e cobertura do efetivo">${g}</svg>`;
+  }
+  function rosca(c){
+    const R = 50, C = 2*Math.PI*R, tot = c.total; let off = 0, arcos = '';
+    [[c.concluida,CP],[c.andamento,CB],[c.pendente,CR]].forEach(([v,cor])=>{ if(!tot||!v) return; const len = C*v/tot; arcos += `<circle cx="70" cy="70" r="${R}" fill="none" stroke="${cor}" stroke-width="17" stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 70 70)"/>`; off += len; });
+    return `<svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="Distribuição das solicitações"><circle cx="70" cy="70" r="${R}" fill="none" stroke="#1a2a45" stroke-width="17"/>${arcos}<text x="70" y="70" text-anchor="middle" class="pn-rt">${tot}</text><text x="70" y="88" text-anchor="middle" class="pn-rs">total</text></svg>`;
+  }
+  function barras(itens, W, H){
+    const m = {l:42, r:10, t:22, b:30}, iw = W-m.l-m.r, ih = H-m.t-m.b, n = itens.length, bw = Math.min(34, iw/n*.5);
+    const y = v => m.t + ih - v/100*ih, x = i => m.l + (i+.5)*iw/n;
+    let g = '';
+    [0,25,50,75,100].forEach(v=>{ g += `<line x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}" stroke="#22314d" stroke-dasharray="3 4"/><text x="${m.l-7}" y="${y(v)+4}" text-anchor="end" class="pn-ax">${v}%</text>`; });
+    g += `<line x1="${m.l}" x2="${W-m.r}" y1="${y(GOAL_PCT)}" y2="${y(GOAL_PCT)}" stroke="${CY}" stroke-width="1.3" stroke-dasharray="6 5"/>`;
+    itens.forEach((it,i)=>{
+      if(it.pct!=null){ g += `<rect x="${x(i)-bw/2}" y="${y(it.pct)}" width="${bw}" height="${Math.max(1,y(0)-y(it.pct))}" rx="3" fill="${CP}" opacity=".92"><title>${esc(it.tip)}</title></rect><text x="${x(i)}" y="${y(it.pct)-6}" text-anchor="middle" class="pn-val">${it.pct}%</text>`; }
+      else g += `<text x="${x(i)}" y="${y(0)-8}" text-anchor="middle" class="pn-ax">—</text>`;
+      g += `<text x="${x(i)}" y="${H-10}" text-anchor="middle" class="pn-ax">${esc(it.label)}</text>`;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Tendência mensal do cumprimento do plano">${g}</svg>`;
+  }
+
+  /* ───────── solicitações ───────── */
+  function solicitacoes(todas, ini, fim){
+    const r = todas.filter(x=>x.status!=='excluida' && (x.createdAt||0)>=ini.getTime() && (x.createdAt||0)<=fim.getTime());
+    const c = {total:r.length, concluida:0, andamento:0, pendente:0, outros:0};
+    r.forEach(x=>{ if(x.status==='concluida') c.concluida++; else if(x.status==='andamento') c.andamento++; else if(x.status==='aberta') c.pendente++; else c.outros++; });
+    return c;
+  }
+
+  /* ───────── séries ───────── */
+  function somaDias(dias, g){
+    const a = A0(), e = E0();
+    dias.forEach(d=>{ if(g==='ALL'){ addA(a,d.T1); addA(a,d.T2); addE(e,d.e.T1); addE(e,d.e.T2); } else { addA(a,d[g]); addE(e,d.e[g]); } });
+    return {a, e};
+  }
+  function ponto(label, titulo, dias, g, extra){
+    const s = somaDias(dias, g), pc = pctA(s.a), pb = pctCob(s.e);
+    return {label, tit:titulo+(extra||''),
+      cump: pc==null ? null : {pct:pc, real:realA(s.a), base:baseA(s.a)},
+      cob: pb==null ? null : {pct:pb, cov:s.e.cov*12, prev:s.e.prev*12}};
+  }
+  function seriePorSemana(dias, g){
+    const m = new Map();
+    dias.forEach(d=>{ const dt = parseDs(d.ds), ini = startOfWeek(dt), k = dateStr(ini); if(!m.has(k)) m.set(k,{ini, dias:[]}); m.get(k).dias.push(d); });
+    return [...m.values()].sort((a,b)=>a.ini-b.ini).map(w=>{
+      const p0 = parseDs(w.dias[0].ds), p1 = parseDs(w.dias[w.dias.length-1].ds);
+      return ponto('S'+p52WeekNum(w.ini), 'Semana '+p52WeekNum(w.ini)+' · '+fmtDM(p0)+(w.dias.length>1?' a '+fmtDM(p1):''), w.dias, g, w.dias.length<7 ? ' · período parcial ('+w.dias.length+' dia'+(w.dias.length>1?'s':'')+')' : '');
+    });
+  }
+  function serieMeses(meses, g){
+    return meses.filter(x=>x.dias.length).map(x=>ponto(MES3[x.m]+(x.a!==hojeD().getFullYear()||meses.some(y=>y.a!==x.a)?'/'+String(x.a).slice(2):''), MESES[x.m]+'/'+x.a, x.dias, g, mesFechado(x.a,x.m)?'':' · mês em andamento'));
+  }
+
+  /* ───────── tela ───────── */
+  const est = {};                                                       // estado da tela atual
+  function skel(w,h,x){ return `<i class="ds-sk" style="width:${w};height:${h};${x||''}"></i>`; }
+  function delta(v, bomSobe, unidade, ref, dec){
+    if(v==null) return `<span class="pn-d pn-d0">sem base comparável</span>`;
+    if(v===0) return `<span class="pn-d pn-d0">— 0 ${unidade} ${esc(ref)}</span>`;
+    return `<span class="pn-d ${(v>0)===bomSobe?'pn-bom':'pn-ruim'}"><b>${v>0?'↑':'↓'} ${sinal(v,'',dec)} ${unidade}</b> ${esc(ref)}</span>`;
+  }
+  const seta = (v, bomSobe) => v==null || v===0 ? '<span class="pn-eq">—</span>' : `<span class="${(v>0)===bomSobe?'pn-up':'pn-dn'}">${v>0?'↑':'↓'}</span>`;
+  const somaMeses = meses => somaDias(meses.flatMap(x=>x.dias), 'ALL');
+
+  function dadosPeriodo(){
+    const meses = est.meses || [];
+    const dias = meses.flatMap(x=>x.dias).sort((a,b)=>a.ds<b.ds?-1:1);
+    const s = somaDias(dias, 'ALL');
+    const areas = new Map(); meses.forEach(x=>x.areas.forEach((A,n)=>{ let X = areas.get(n); if(!X){ X = A0(); areas.set(n,X); } addA(X,A); }));
+    return {dias, s, areas};
+  }
+  const ultDiaPeriodo = () => { const d = dadosPeriodo().dias; return d.length ? parseDs(d[d.length-1].ds) : hojeD(); };
+
+  /* ── Carregamento: leituras em paralelo; cada bloco aparece assim que seus dados chegam ──
+        1) registro + consolidados (1 leitura) + solicitações em segundo plano
+        2) todos os meses necessários numa fila com 3 trabalhadores (snapshots são instantâneos; só o que falta é calculado) */
+  window.dsInicioProgressivo = function(tok){
+    const p = periodoAtual(), h = hojeD();
+    Object.keys(est).forEach(k=>delete est[k]);
+    Object.assign(est, {tok, p, filtro:window.__dsFiltro||'ALL', escala:window.__dsEscala||'sem', ordem:window.__dsOrdem||'pior', consol:window.__dsConsol||'ano', pend:{cur:1, ref:1, tend:1, sol:1, ano:1}, falha:[], mapa:new Map()});
+    const vivo = () => tok === _inicioTok;
+    const pintar = () => { if(vivo()){ desenhar(); try{ window.dsPeriodoHeader(); }catch(e){} } };
+    pintar();
+    const seguro = async (n, fn) => { try{ return await fn(); }catch(e){ console.error('[Painel] '+n, e); est.falha.push(n); return null; } };
+    (async()=>{
+      const solP = (async()=>{ await new Promise(r=>setTimeout(r,60)); const todas = await seguro('solicitações', ()=>loadAllRequests()); if(!vivo()) return; est.todas = todas || []; delete est.pend.sol; pintar(); })();
+      const [reg] = await Promise.all([seguro('registro', ()=>plInicioRegistro()), lerConsolidados()]);
+      regIni = reg || '9999-12-31'; window.__dsRegIni = regIni; if(!vivo()) return; est.reg = regIni;
+      const ok = (a,m) => regIni!=='9999-12-31' && new Date(a,m,ultDia(a,m)) >= parseDs(regIni);
+      // meses necessários, por prioridade
+      const ordem = [], vistos = new Set(); const add = (x) => { if(!x || !ok(x.a,x.m)) return; const k = ymKey(x.a,x.m); if(vistos.has(k)) return; vistos.add(k); ordem.push(x); };
+      const doPeriodo = mesesDoPeriodo(p); doPeriodo.slice().reverse().forEach(add);
+      let refMeses = [];
+      if(p.t==='mes'){ const pa = mesAnterior(p.a,p.m); est.refInfo = pa; refMeses = [pa]; }
+      else if(p.t==='ano'){ est.refInfo = {ano:p.a-1}; refMeses = mesesDoPeriodo({t:'ano', a:p.a-1}); }
+      refMeses.forEach(add);
+      const fimM = p.t==='mes' ? {a:p.a,m:p.m} : {a:h.getFullYear(), m:h.getMonth()};
+      const seis = []; { let c = {...fimM}; for(let i=0;i<6;i++){ seis.unshift({...c}); c = mesAnterior(c.a,c.m); } }
+      seis.slice().reverse().forEach(add);
+      const anoCons = p.t==='mes' || p.t==='ano' ? p.a : h.getFullYear(); est.anoCons = anoCons;
+      const mesesAno = mesesDoPeriodo({t:'ano', a:anoCons}); mesesAno.slice().reverse().forEach(add);
+      const chaves = x => ymKey(x.a,x.m);
+      const carregados = () => ordem.filter(x=>est.mapa.has(chaves(x)));
+      const todosCarregados = lista => lista.length===0 || lista.every(x=>est.mapa.has(chaves(x)));
+      const atualizar = () => {
+        est.meses = doPeriodo.filter(x=>est.mapa.has(chaves(x))).map(x=>est.mapa.get(chaves(x))).sort((a,b)=>a.ym<b.ym?-1:1);
+        if(todosCarregados(doPeriodo.filter(x=>ok(x.a,x.m)))) delete est.pend.cur;
+        if(todosCarregados(refMeses.filter(x=>ok(x.a,x.m)))){ delete est.pend.ref;
+          if(p.t==='mes'){ est.ref = est.mapa.get(chaves(refMeses[0])) || null; }
+          else if(p.t==='ano'){ const dp = dadosPeriodo(); const ult = dp.dias.length ? parseDs(dp.dias[dp.dias.length-1].ds) : null; const lim = ult ? dateStr(new Date(p.a-1, ult.getMonth(), ult.getDate())) : null; const dias = lim ? refMeses.filter(x=>est.mapa.has(chaves(x))).flatMap(x=>est.mapa.get(chaves(x)).dias).filter(d=>d.ds<=lim) : []; est.ref = dias.length ? {dias, areas:new Map()} : null; }
+          else est.ref = null; }
+        const seisOk = seis.filter(x=>ok(x.a,x.m)); est.tend = seisOk.filter(x=>est.mapa.has(chaves(x))).map(x=>est.mapa.get(chaves(x))); if(todosCarregados(seisOk)) delete est.pend.tend;
+        const anoOk = mesesAno.filter(x=>ok(x.a,x.m)); est.anoMeses = anoOk.filter(x=>est.mapa.has(chaves(x))).map(x=>est.mapa.get(chaves(x))); if(todosCarregados(anoOk)) delete est.pend.ano;
+        if(est.pend.cur===undefined){ const dp = dadosPeriodo(); window.__dsAte = dp.dias.length ? fmtBR(parseDs(dp.dias[dp.dias.length-1].ds)) : null; }
+      };
+      // o período selecionado tem prioridade total (não divide banda com meses antigos); depois vem o restante
+      const executar = async (fila) => { let idx = 0; const w = async () => { while(idx < fila.length){ const x = fila[idx++]; const r = await seguro('mês '+chaves(x), ()=>mesAgg(x.a, x.m, regIni)); if(!vivo()) return; if(r) est.mapa.set(chaves(x), r); atualizar(); pintar(); } }; await Promise.all([w(), w(), w()]); };
+      if(!ordem.length){ delete est.pend.cur; delete est.pend.ref; delete est.pend.tend; delete est.pend.ano; est.meses = []; pintar(); }
+      const chavesPrio = new Set(doPeriodo.map(chaves)); const prio = ordem.filter(x=>chavesPrio.has(chaves(x))), resto = ordem.filter(x=>!chavesPrio.has(chaves(x)));
+      await executar(prio); if(!vivo()) return; await executar(resto);
+      if(!vivo()) return; atualizar(); pintar();
+      await solP;
+      if(est.escala==='mes') carregarMesesDoGrafico();
+      setTimeout(()=>{ try{ if(window.dsPrefetch) window.dsPrefetch(); }catch(e){} }, 800);
+    })();
+  };
+  async function carregarMesesDoGrafico(){
+    const tok = est.tok, p = est.p; if(est.mesesGraf) return;
+    const base = p.t==='hist' ? mesesDisp().reverse() : mesesDoPeriodo({t:'ano', a:p.a});
+    const out = []; est.mesesGraf = []; est.carregandoMesesGraf = true; desenhar();
+    for(const x of base){ try{ const r = est.mapa.get(ymKey(x.a,x.m)) || await mesAgg(x.a, x.m, est.reg); if(tok!==est.tok) return; out.push(r); est.mesesGraf = out.slice(); desenhar(); }catch(e){ console.error(e); } }
+    est.carregandoMesesGraf = false; desenhar();
+  }
+  function ir(dest){ inicioIr(dest); }
+  const abrirRelatorio = () => { reportSection = 'checklist'; reportPeriod = 'month'; reportDate = ultDiaPeriodo(); document.getElementById('navReport').click(); };
+
+  function desenhar(){
+    const app = document.getElementById('app'); if(!app || est.tok!==_inicioTok) return;
+    const p = est.p, pend = est.pend, dp = dadosPeriodo(), s = dp.s;
+    const nome = String((currentUser && currentUser.nome) || currentEmployee || '').trim().split(/\s+/)[0] || '';
+    const meu = descPeriodo(p, window.__dsAte), ehMes = p.t==='mes';
+    const tituloSec = ehMes ? 'Desempenho do mês' : (p.t==='ano' ? 'Desempenho do ano' : 'Desempenho no histórico');
+    const refRot = ehMes ? 'vs. mês anterior' : (p.t==='ano' ? 'vs. '+(p.a-1) : '');
+    const refS = est.ref ? somaDias(est.ref.dias, 'ALL') : null;
+    const pc = pctA(s.a), pa = pctAbs(s.e), pb = pctCob(s.e);
+    const prc = refS ? pctA(refS.a) : null, pra = refS ? pctAbs(refS.e) : null, prb = refS ? pctCob(refS.e) : null;
+    const dC = (pc!=null && prc!=null) ? pc-prc : null, dA = (pa!=null && pra!=null) ? Math.round((pa-pra)*10)/10 : null, dB = (pb!=null && prb!=null) ? pb-prb : null;
+    const periodoDatas = (pp) => pp.t==='mes' ? [new Date(pp.a,pp.m,1), new Date(pp.a,pp.m+1,0,23,59,59,999)] : (pp.t==='ano' ? [new Date(pp.a,0,1), new Date(pp.a,11,31,23,59,59,999)] : [new Date(2000,0,1), new Date(2100,0,1)]);
+    const sol = est.todas ? solicitacoes(est.todas, ...periodoDatas(p)) : null;
+    let solRef = null; if(est.todas && ehMes && est.refInfo) solRef = solicitacoes(est.todas, new Date(est.refInfo.a,est.refInfo.m,1), new Date(est.refInfo.a,est.refInfo.m+1,0,23,59,59,999)); else if(est.todas && p.t==='ano') solRef = solicitacoes(est.todas, new Date(p.a-1,0,1), new Date(p.a-1,11,31,23,59,59,999));
+    const dS = (sol && solRef && solRef.total>0) ? Math.round((sol.total-solRef.total)/solRef.total*100) : null;
+    const refTxt = ehMes ? 'vs. mês anterior' : (p.t==='ano' ? 'vs. '+(p.a-1) : '');
+    const curto = ehMes && est.refInfo ? 'vs. '+MES3[est.refInfo.m].toLowerCase()+'.' : refTxt;
+    const vazioMsg = 'sem registros no período';
+    const R = 27, CIRC = 2*Math.PI*R;
+    const ring = pc==null ? '' : `<svg viewBox="0 0 66 66" width="62" height="62" aria-hidden="true"><circle cx="33" cy="33" r="${R}" fill="none" stroke="#143a46" stroke-width="7"/><circle cx="33" cy="33" r="${R}" fill="none" stroke="${CP}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(CIRC*Math.min(100,pc)/100).toFixed(1)} ${CIRC.toFixed(1)}" transform="rotate(-90 33 33)"/><text x="33" y="38" text-anchor="middle" class="pn-rg">${pc}%</text></svg>`;
+    const skK = cls => `<div class="pn-kpi ${cls}">${skel('46px','46px','border-radius:50%')}<div class="pn-kb">${skel('90px','28px')}${skel('120px','13px','margin-top:7px')}${skel('100px','12px','margin-top:7px')}</div></div>`;
+    const kpi = (id, cls, tit, inner, link) => `<button type="button" class="pn-kpi ${cls}" id="${id}" title="${esc(tit)}">${inner}<span class="pn-kl">${link} →</span></button>`;
+    const kCump = pend.cur ? skK('ok') : kpi('pnKCump','ok','Abrir o Relatório de cumprimento',
+      `<span class="pn-ring">${ring || `<span class="pn-ic pn-ic-ok">${svg('target','')}</span>`}</span><span class="pn-kb"><b class="pn-kt">Cumprimento do plano</b><span class="pn-ks" title="Atividades realizadas (no horário + com atraso) ÷ previstas com prazo vencido">${pc!=null ? nf(realA(s.a))+' de '+nf(baseA(s.a))+' atividades realizadas' : vazioMsg}</span>${pc!=null ? (pend.ref ? '<span class="pn-d pn-d0">calculando variação…</span>' : delta(dC,true,'p.p.',refTxt)) : ''}</span><span class="pn-bar"><i style="width:${pc||0}%"></i></span><span class="pn-meta2">Meta: ${GOAL_PCT}%</span>`,'Ver detalhes');
+    const kAbs = pend.cur ? skK('am') : kpi('pnKAbs','am','Abrir o Efetivo',
+      `<span class="pn-ic pn-ic-au">${svg('users','')}</span><span class="pn-kb"><span class="pn-kv">${pa!=null?dec1(pa)+'%':'—'}</span><b class="pn-kt">Absenteísmo</b><span class="pn-ks" title="Faltas ÷ efetivo previsto (previsto × dias lançados)">${pa!=null?s.e.falt+' de '+s.e.prev+' colaboradores':'sem lançamento de efetivo'}</span>${pa!=null ? (pend.ref ? '<span class="pn-d pn-d0">calculando variação…</span>' : delta(dA,false,'p.p.',refTxt,true)) : ''}</span>`,'Ver efetivo');
+    const kCob = pend.cur ? skK('bl') : kpi('pnKCob','bl','Abrir o Efetivo',
+      `<span class="pn-ic pn-ic-bl">${svg('user','')}</span><span class="pn-kb"><span class="pn-kv">${pb!=null?pb+'%':'—'}</span><b class="pn-kt">Cobertura operacional</b><span class="pn-ks" title="Horas de posto cobertas ÷ horas necessárias (12 h por posto/turno), limitadas ao previsto: ${s.e.cov*12} h de ${s.e.prev*12} h">${pb!=null?'(em horas)':'indisponível: sem lançamento de efetivo'}</span>${pb!=null ? (pend.ref ? '<span class="pn-d pn-d0">calculando variação…</span>' : delta(dB,true,'p.p.',refTxt)) : ''}</span>`,'Ver detalhamento');
+    const kSol = (pend.sol||!sol) ? skK('rd') : kpi('pnKSol','rd','Abrir as Solicitações',
+      `<span class="pn-ic pn-ic-rd"><b class="pn-ex">!</b></span><span class="pn-kb"><span class="pn-kv">${sol.total}</span><b class="pn-kt">Solicitações ${ehMes?'no mês':(p.t==='ano'?'no ano':'no histórico')}</b><span class="pn-leg"><i style="background:${CP}"></i>${sol.concluida} concluída${sol.concluida===1?'':'s'}</span><span class="pn-leg"><i style="background:${CB}"></i>${sol.andamento} em andamento</span><span class="pn-leg"><i style="background:${CR}"></i>${sol.pendente} pendente${sol.pendente===1?'':'s'}</span></span>`,'Ver solicitações');
+    // gráfico
+    const g = est.filtro; let pts = [], subt = '';
+    if(est.escala==='mes'){ pts = serieMeses(est.mesesGraf || [], g); }
+    else pts = seriePorSemana(dp.dias, g);
+    const carregandoGraf = pend.cur || (est.escala==='mes' && est.carregandoMesesGraf && !pts.length);
+    const grafHtml = carregandoGraf ? '<i class="ds-sk" style="position:absolute;inset:0;border-radius:8px"></i>' : (pts.length ? '' : '<div class="pn-vazio">Sem registros no período selecionado.</div>');
+    // áreas
+    const lista = [...dp.areas.entries()].map(([n,A])=>({n, prev:baseA(A), real:realA(A), pct:baseA(A)>0 ? Math.round(realA(A)/baseA(A)*100) : null})).filter(x=>x.prev>0);
+    lista.sort((a,b)=> est.ordem==='pior' ? (a.pct-b.pct)||(b.prev-a.prev) : (b.pct-a.pct)||(b.prev-a.prev));
+    const top5 = lista.slice(0,5);
+    // tendência
+    const tend = (est.tend||[]).map(x=>{ const ss = somaMeses([x]); const pct = pctA(ss.a); return {label:MES3[x.m]+'/'+String(x.a).slice(2), pct, tip:MESES[x.m]+'/'+x.a+': '+(pct==null?'sem registros':pct+'% ('+realA(ss.a)+' de '+baseA(ss.a)+' atividades)')+(mesFechado(x.a,x.m)?'':' · mês em andamento')}; });
+    // consolidado do período (cartão inferior)
+    const cons = est.consol;
+    let cs = null, csSol = null, csTit = '';
+    if(cons==='ano'){ const ms = est.anoMeses || []; cs = ms.length ? somaMeses(ms) : null; csTit = est.anoCons; if(est.todas) csSol = solicitacoes(est.todas, new Date(est.anoCons,0,1), new Date(est.anoCons,11,31,23,59,59,999)); }
+    else { cs = s; csSol = sol; csTit = ehMes ? MESES[p.m]+'/'+p.a : meu.titulo; }
+    const sufix = cons==='ano' ? ['(acumulado)','(acumulada)','(ano)'] : ['(mês)','(mês)','(mês)'];
+    const csPend = cons==='ano' ? pend.ano : pend.cur;
+    const rowC = (cor, ic, rot, val, extra) => `<div class="pn-cl"><span class="pn-ci" style="background:${cor}">${svg(ic,'')}</span><span class="pn-clb"><small>${rot}</small>${extra||''}</span><b>${val}</b></div>`;
+    const consBottom = csPend ? [1,2,3,4].map(()=>`<div class="pn-cl">${skel('26px','26px','border-radius:50%')}<span class="pn-clb">${skel('100%','13px')}</span></div>`).join('') :
+      rowC('#12403a','target','Cumprimento do plano '+sufix[0], cs&&pctA(cs.a)!=null ? pctA(cs.a)+'%' : '—') +
+      rowC('#7a5c10','users','Absenteísmo '+sufix[0], cs&&pctAbs(cs.e)!=null ? dec1(pctAbs(cs.e))+'%' : '—') +
+      rowC('#173f86','user','Cobertura operacional '+sufix[1], cs&&pctCob(cs.e)!=null ? pctCob(cs.e)+'%' : '—') +
+      `<div class="pn-cl"><span class="pn-ci" style="background:#7a5c10">${svg('doc','')}</span><span class="pn-clb"><small>Solicitações ${sufix[2]}</small>${csSol?`<span class="pn-mini"><i style="background:${CP}"></i>${csSol.concluida}<i style="background:${CB}"></i>${csSol.andamento}<i style="background:${CR}"></i>${csSol.pendente}</span>`:''}</span><b>${csSol?csSol.total:'—'}</b></div>`;
+    // visão consolidada (lateral)
+    const tabs = {mes:p.t==='mes', ano:p.t==='ano'};
+    const dtx = (v,u,dec) => v==null ? 'sem base comparável' : (v===0 ? '— 0 '+u : sinal(v,'',dec)+' '+u)+' '+(ehMes ? curto : refTxt);
+    const box = (ic, rot, valor, setaHtml, det) => `<div class="pn-cbox"><div class="pn-cbi">${svg(ic,'')}</div><div class="pn-cbt"><small>${rot}</small><b>${valor}</b></div><div class="pn-cd">${setaHtml}<span>${det}</span></div></div>`;
+    const consRows = pend.cur ? [1,2,3,4].map(()=>`<div class="pn-cbox">${skel('100%','34px')}</div>`).join('') :
+      box('clock','Cumprimento do plano', `<span style="color:${CP}">${pc!=null?pc+'%':'—'}</span>`, seta(dC,true), pend.ref?'…':dtx(dC,'p.p.')) +
+      box('target','Absenteísmo', pa!=null?dec1(pa)+'%':'—', seta(dA,false), pend.ref?'…':dtx(dA,'p.p.',true)) +
+      box('users','Cobertura operacional', `<span style="color:${CB}">${pb!=null?pb+'%':'—'}</span>`, seta(dB,true), pend.ref?'…':dtx(dB,'p.p.')) +
+      box('doc','Solicitações (total)', sol?sol.total:'—', dS==null||dS===0?'<span class="pn-eq">—</span>':`<span class="${dS>0?'pn-up':'pn-dn'}" style="color:${CB}">${dS>0?'↑':'↓'}</span>`, sol ? (dS==null?'sem base comparável':sinal(dS,'%')+' '+(ehMes?curto:refTxt)) : '');
+    const alerta = (!pend.cur && pc!=null && pc < GOAL_PCT) ? `<button type="button" class="pn-alerta" id="pnAlerta" title="Abrir o Relatório">⚠ Cumprimento (${pc}%) abaixo da meta de ${GOAL_PCT}%</button>` : '';
+    const falhas = est.falha.length ? `<div class="pn-aviso">Alguns dados não puderam ser carregados (${esc(est.falha.join(', '))}). Nenhum valor foi estimado.</div>` : '';
+    const proxOk = p.t==='mes' && !(p.a===hojeD().getFullYear() && p.m===hojeD().getMonth());
+    app.innerHTML = `<div class="ds-home pn">${falhas}
+      <section class="pn-hero"><div class="pn-hero-l"><i class="pn-bar-y"></i><div><h2>Olá, <em>${esc(nome||'bem-vindo(a)')}</em>!</h2><p>Aqui você acompanha os principais indicadores e o andamento das atividades de limpeza do MG02.</p></div></div>
+        <div class="pn-hero-art" aria-hidden="true"><div class="pn-wh"></div><div class="pn-hero-t"><b>MG02</b><small>Mercado Livre — Betim</small></div></div></section>
+      <div class="pn-sec">${svg('chart','pn-yi')}<h2>${tituloSec}</h2><span class="pn-sec-r">${alerta}<button type="button" class="pn-info" id="pnSaiba" title="Como os indicadores são calculados">ⓘ Como calculamos</button></span></div>
+      <section class="pn-kpis">${kCump}${kAbs}${kCob}${kSol}</section>
+      <div class="pn-mid">
+        <section class="pn-card pn-graf"><header class="pn-ch"><h3>${svg('chart','pn-yi')} Evolução do cumprimento do plano e cobertura do efetivo</h3>
+            <div class="pn-ctl"><div class="pn-seg" role="tablist"><button type="button" data-esc="sem" class="${est.escala==='sem'?'on':''}">Semanas</button><button type="button" data-esc="mes" class="${est.escala==='mes'?'on':''}">Meses</button></div>
+            <select id="pnFiltro" aria-label="Turno"><option value="ALL" ${g==='ALL'?'selected':''}>T1 + T2</option><option value="T1" ${g==='T1'?'selected':''}>T1</option><option value="T2" ${g==='T2'?'selected':''}>T2</option></select>
+            <button type="button" class="pn-tot ${g==='ALL'?'on':''}" id="pnTotal" title="Total da operação (T1 + T2)">Total</button></div></header>
+          <div class="pn-lg"><span><i style="background:${CP}"></i>Cumprimento do plano (%)</span><span><i style="background:${CB}"></i>Cobertura operacional (%)</span><span><i class="dash"></i>Meta de ${GOAL_PCT}% (cumprimento)</span></div>
+          <div class="pn-chart" id="pnChart">${grafHtml}<div class="pn-tip" id="pnTip" role="status"></div></div></section>
+        <aside class="pn-card pn-cons"><header class="pn-ch"><h3>${svg('target','pn-yi')} Visão consolidada</h3></header>
+          <div class="pn-seg pn-seg2"><button type="button" data-per="mes" class="${tabs.mes?'on':''}">Mensal</button><button type="button" data-per="ano" class="${tabs.ano?'on':''}">Acumulado anual</button></div>
+          <div class="pn-cp"><b>${esc(meu.titulo)}</b><em><i class="${meu.verde?'on':''}"></i>${esc(meu.estado)}</em></div>
+          <div class="pn-cbs">${consRows}</div>
+          <button type="button" class="pn-lnk" id="pnRelCompleto">Ver relatório completo →</button></aside>
+      </div>
+      <div class="pn-bottom">
+        <section class="pn-card"><header class="pn-ch"><h3>${svg('chart','pn-yi')} Desempenho por área</h3><span class="pn-hr"><button type="button" class="pn-ord" id="pnOrdem" title="Inverter a ordenação">⇅</button><button type="button" class="pn-lnk2" id="pnTodasAreas">Ver todas →</button></span></header>
+          <p class="pn-sub">Cumprimento do plano no ${ehMes?'mês':'período'} · ${est.ordem==='pior'?'menor cumprimento primeiro':'maior cumprimento primeiro'}</p>
+          ${pend.cur ? `<div style="padding:6px 0">${skel('100%','14px','margin-bottom:12px')}${skel('100%','14px','margin-bottom:12px')}${skel('100%','14px','margin-bottom:12px')}${skel('100%','14px')}</div>` :
+            (top5.length ? `<table class="pn-tb"><thead><tr><th>Posição</th><th class="l">Área</th><th>Atividades previstas</th><th>Realizadas</th><th>%</th></tr></thead><tbody>${top5.map((x,i)=>`<tr data-area="${esc(x.n)}" tabindex="0" title="Abrir ${esc(x.n)} no Plano de Limpeza"><td><b>${i+1}</b></td><td class="l">${esc(x.n)}</td><td>${nf(x.prev)}</td><td>${nf(x.real)}</td><td class="${x.pct>=GOAL_PCT?'ok':(x.pct<50?'bad':'')}">${x.pct}%</td></tr>`).join('')}</tbody></table>` : '<div class="pn-vazio">Sem atividades previstas no período.</div>')}</section>
+        <section class="pn-card"><header class="pn-ch"><h3>${svg('chart','pn-yi')} Tendência mensal <small>(últimos 6 meses)</small></h3></header>
+          <button type="button" class="pn-lnk2 pn-sub-r" id="pnRelHist">Ver relatório de histórico →</button>
+          <div class="pn-tend" id="pnTend">${pend.tend && !tend.length ? '<i class="ds-sk" style="position:absolute;inset:0;border-radius:8px"></i>' : (tend.length ? '' : '<div class="pn-vazio">Sem meses com registros.</div>')}</div>
+          <div class="pn-lg pn-lg2"><span><i style="background:${CP}"></i>Cumprimento do plano</span><span><i class="dash"></i>Meta ${GOAL_PCT}%</span></div></section>
+        <section class="pn-card"><header class="pn-ch"><h3>${svg('doc','pn-yi')} Solicitações por status</h3></header>
+          ${(pend.sol||!sol) ? `<div class="pn-donutw">${skel('120px','120px','border-radius:50%')}<div style="flex:1">${skel('100%','14px','margin-bottom:14px')}${skel('100%','14px','margin-bottom:14px')}${skel('100%','14px')}</div></div>` :
+            `<div class="pn-donutw">${rosca(sol)}<table class="pn-dl"><tbody>${[['Concluídas',sol.concluida,CP],['Em andamento',sol.andamento,CB],['Pendentes',sol.pendente,CR]].map(([r,v,c])=>`<tr><td><i style="background:${c}"></i>${r}</td><td>${v} <span>(${sol.total?Math.round(v/sol.total*100):0}%)</span></td></tr>`).join('')}</tbody></table></div>${sol.outros?`<div class="pn-nota">${sol.outros} solicitação(ões) com outro status não entram na rosca.</div>`:''}`}
+          <button type="button" class="pn-lnk" id="pnTodasSol">Ver solicitações →</button></section>
+        <section class="pn-card"><header class="pn-ch"><h3>${svg('target','pn-yi')} Consolidado do período</h3></header>
+          <div class="pn-seg pn-seg2 pn-seg3"><button type="button" data-cons="mes" class="${cons==='mes'?'on':''}">Mensal</button><button type="button" data-cons="ano" class="${cons==='ano'?'on':''}">Anual</button></div>
+          <p class="pn-sub" style="margin:0 0 4px">${cons==='ano'?'Acumulado de '+esc(String(csTit))+' (soma dos meses com registros)':esc(String(csTit))}</p>
+          <div class="pn-cls">${consBottom}</div>
+          <button type="button" class="pn-lnk" id="pnRelCons">Ver histórico completo →</button></section>
+      </div></div>`;
+
+    /* gráficos dimensionados pelo contêiner */
+    const $ = id => document.getElementById(id);
+    const sizeGraf = () => {
+      const box = $('pnChart'); if(box && pts.length && !carregandoGraf){ const w = Math.max(360, box.clientWidth), hh = Math.max(180, box.clientHeight); const t = $('pnTip'); box.innerHTML = grafico(pts, w, hh); box.appendChild(t || Object.assign(document.createElement('div'),{id:'pnTip',className:'pn-tip'}));
+        box.querySelectorAll('.pn-hit').forEach(r=>{ const i = +r.dataset.i, P = pts[i]; const mostra = ev => { const tp = $('pnTip'); const lin = [`<b>${esc(P.tit)}</b>`, `<span style="color:${CP}">●</span> Cumprimento: ${P.cump?P.cump.pct+'% ('+nf(P.cump.real)+' de '+nf(P.cump.base)+' atividades)':'sem registros'}`, `<span style="color:${CB}">●</span> Cobertura: ${P.cob?P.cob.pct+'% ('+nf(P.cob.cov)+' h de '+nf(P.cob.prev)+' h)':'sem lançamento de efetivo'}`, `<span style="color:${CY}">╌</span> Meta de cumprimento: ${GOAL_PCT}%`]; tp.innerHTML = lin.join('<br>'); tp.style.display = 'block'; const br = box.getBoundingClientRect(); let x = ev.clientX-br.left+14, y = ev.clientY-br.top-10; if(x+tp.offsetWidth>br.width-4) x = ev.clientX-br.left-tp.offsetWidth-14; tp.style.left = Math.max(4,x)+'px'; tp.style.top = Math.max(4,y)+'px'; };
+          r.addEventListener('mousemove', mostra); r.addEventListener('mouseenter', mostra); r.addEventListener('mouseleave', ()=>{ $('pnTip').style.display = 'none'; }); });
+      }
+      const tb = $('pnTend'); if(tb && tend.length){ tb.innerHTML = barras(tend, Math.max(240, tb.clientWidth), Math.max(120, tb.clientHeight)); }
+    };
+    sizeGraf();
+    if(!window.__pnRz){ window.__pnRz = true; window.addEventListener('resize', ()=>{ clearTimeout(window.__pnRzT); window.__pnRzT = setTimeout(()=>{ if(document.getElementById('pnChart') && window.__pnRedesenhar) window.__pnRedesenhar(); }, 150); }); }
+    window.__pnRedesenhar = sizeGraf;
+
+    /* interações */
+    const on = (id, fn) => { const e = $(id); if(e) e.onclick = fn; };
+    const fimP = ultDiaPeriodo();
+    on('pnKCump', abrirRelatorio); on('pnRelCompleto', abrirRelatorio); on('pnRelHist', abrirRelatorio); on('pnAlerta', abrirRelatorio); on('pnRelCons', abrirRelatorio);
+    on('pnKAbs', ()=>ir({tipo:'efetivo', data:fimP})); on('pnKCob', ()=>ir({tipo:'efetivo', data:fimP}));
+    on('pnKSol', ()=>ir({tipo:'solicitacoes', sub:'pendentes'})); on('pnTodasSol', ()=>ir({tipo:'solicitacoes', sub:'pendentes'}));
+    on('pnTodasAreas', ()=>{ const b = document.getElementById('navAreas'); if(b && getComputedStyle(b).display!=='none') b.click(); else ir({tipo:'plano', data:fimP}); });
+    on('pnOrdem', ()=>{ window.__dsOrdem = est.ordem==='pior' ? 'melhor' : 'pior'; est.ordem = window.__dsOrdem; desenhar(); });
+    on('pnSaiba', ()=>saibaMais());
+    on('pnTotal', ()=>{ window.__dsFiltro = 'ALL'; est.filtro = 'ALL'; desenhar(); });
+    app.querySelectorAll('.pn-tb tbody tr').forEach(tr=>{ const go = ()=>ir({tipo:'plano', data:fimP, local:tr.dataset.area}); tr.onclick = go; tr.onkeydown = e=>{ if(e.key==='Enter') go(); }; });
+    app.querySelectorAll('[data-esc]').forEach(b=>b.onclick = ()=>{ window.__dsEscala = b.dataset.esc; est.escala = b.dataset.esc; if(est.escala==='mes') carregarMesesDoGrafico(); desenhar(); });
+    app.querySelectorAll('[data-cons]').forEach(b=>b.onclick = ()=>{ window.__dsConsol = b.dataset.cons; est.consol = b.dataset.cons; desenhar(); });
+    if($('pnFiltro')) $('pnFiltro').onchange = e=>{ window.__dsFiltro = e.target.value; est.filtro = e.target.value; desenhar(); };
+    app.querySelectorAll('[data-per]').forEach(b=>b.onclick = ()=>{ const h2 = hojeD(); const base = est.p.t==='mes' ? est.p : {a:est.p.a||h2.getFullYear(), m:(est.p.m!=null?est.p.m:h2.getMonth())}; window.__dsPeriodo = b.dataset.per==='mes' ? {t:'mes', a:base.a, m:base.m} : {t:'ano', a:base.a}; renderInicio(); });
+    try{ window.dsPeriodoHeader(); }catch(e){}
+  }
+
+  function saibaMais(){
+    document.getElementById('pnModal')?.remove();
+    const ov = document.createElement('div'); ov.id = 'pnModal'; ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = `<div class="pn-card" style="max-width:640px;width:100%;max-height:88vh;overflow:auto;"><h3 style="margin:0 0 10px;color:#fff;font-size:16px;">Como os indicadores são calculados</h3>
+      <ul style="margin:0;padding-left:18px;line-height:1.6;font-size:13px;color:#c9d4e6;">
+      <li><b>Cumprimento do plano</b>: (atividades no horário + com atraso) ÷ (previstas − ainda dentro do prazo) × 100 — a mesma regra do Relatório. Meta: ${GOAL_PCT}%.</li>
+      <li><b>Absenteísmo</b>: faltas ÷ efetivo previsto × 100. Previsto pela vigência do Dimensionamento de Efetivo; falta = previsto − presentes (nunca negativa).</li>
+      <li><b>Cobertura operacional</b>: horas de posto cobertas ÷ horas necessárias (12 h por posto/turno, escala 12x36), por turno T1/T2, limitada ao previsto. Com a base atual (lista de presentes por turno) ela é o complemento do absenteísmo; passa a divergir se for estruturado o registro de horas.</li>
+      <li><b>Solicitações</b>: contadas pela data de criação; pendente = aberta, em andamento, concluída (excluídas ficam de fora).</li>
+      <li><b>Mês, ano e histórico</b>: somam numeradores e denominadores diários — não fazem média de percentuais. Meses encerrados são gravados uma vez em <code>consolidado/AAAA-MM</code>.</li>
+      <li>Dias sem lançamento de efetivo não entram como zero: ficam fora do absenteísmo e da cobertura.</li></ul>
+      <button class="btn" id="pnFechar" style="margin-top:14px;">Fechar</button></div>`;
+    document.body.appendChild(ov); ov.addEventListener('click', e=>{ if(e.target===ov || e.target.id==='pnFechar') ov.remove(); });
+  }
+  }catch(erro){ console.error('[Painel] desativado por erro (o sistema segue com o layout anterior):', erro); if(window.dsDesktopAtivo) window.dsDesktopAtivo = () => false; }
+})();
+</script>
+
+<script>
+/* =====================================================================
+   DESEMPENHO — menos dados lidos, menos repetição, resposta mais rápida
+   ---------------------------------------------------------------------
+   Nenhuma regra de negócio muda; só se evita buscar de novo o que acabou de ser buscado:
+   1) Checklists por dia e efetivo por dia ficam em cache de MEMÓRIA por pouco tempo
+      (20–30 s para os dias recentes, 5 min para os antigos) e são descartados na hora
+      se o próprio usuário gravar aquele dia. Nada é guardado no navegador (sem localStorage).
+   2) Solicitações: uma única leitura que depois fica "viva" (o Firebase só envia o que mudou),
+      em vez de baixar a lista inteira — com fotos — a cada 60 s ou a cada tela.
+   3) Chamadas simultâneas à mesma leitura passam a compartilhar a mesma busca.
+   4) Status do Plano 52 e lista de colaboradores também ficam em cache curto; depois que o Início termina, uma pré-carga
+      leve deixa Efetivo e Plano 52 com os dados à mão.
+   Diagnóstico: abra o sistema com ?semperf=1 para desligar este módulo.
+   ===================================================================== */
+(function(){
+  'use strict';
+  const q = new URLSearchParams(location.search);
+  if(q.get('tab')==='requests' || q.get('kiosk')==='1') return;
+  if(!window.matchMedia('(min-width:769px)').matches) return;     // celular: nada deste módulo é aplicado (comportamento original)
+  if(q.get('semperf')==='1'){ console.warn('[Desempenho] desligado por ?semperf=1'); return; }
+  try{
+    const clone = o => (o==null || typeof o!=='object') ? o : (typeof structuredClone==='function' ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
+    const limiteRecente = () => { const d = inicioDia(p52Today()); d.setDate(d.getDate()-2); return dateStr(d); };
+    const recente = ds => ds >= limiteRecente();
+
+    /* 1a) checklists por dia (usado por Início/Relatório via plLerChecklists) */
+    const cacheChk = new Map(), _plL = plLerChecklists;
+    plLerChecklists = async function(days){
+      const out = {}, agora = Date.now();
+      await Promise.all(days.map(async d=>{
+        const ds = dateStr(d); let c = cacheChk.get(ds);
+        if(!(c && agora - c.t < c.ttl)){
+          c = {t:agora, ttl:recente(ds)?20000:300000};
+          c.p = _plL([d]).then(o=>{ const v = o[ds] || {}; if(!Object.keys(v).length) c.ttl = 20000; return v; });
+          cacheChk.set(ds, c); c.p.catch(()=>cacheChk.delete(ds));
+        }
+        out[ds] = clone(await c.p);
+      }));
+      return out;
+    };
+    /* 1b) efetivo por dia */
+    const cacheEf = new Map(), _le = loadEfetivo;
+    loadEfetivo = async function(ds){
+      const agora = Date.now(); let c = cacheEf.get(ds);
+      if(!(c && agora - c.t < c.ttl)){
+        c = {t:agora, ttl:recente(ds)?45000:600000}; c.p = _le.apply(this, arguments);
+        cacheEf.set(ds, c); c.p.catch(()=>cacheEf.delete(ds));
+      }
+      return clone(await c.p);
+    };
+    /* 1c) colaboradores (lista usada pelo Efetivo) */
+    let cacheCol = null; const _lc = loadColaboradores;
+    loadColaboradores = async function(){
+      const agora = Date.now();
+      if(!(cacheCol && agora - cacheCol.t < 60000)){ cacheCol = {t:agora}; cacheCol.p = _lc.apply(this, arguments); cacheCol.p.catch(()=>{ cacheCol = null; }); }
+      return clone(await cacheCol.p);
+    };
+    /* 1d) status do Plano 52 por dia */
+    const cacheP52 = new Map(), _ps = p52LoadStatusDay;
+    p52LoadStatusDay = async function(ds){
+      const agora = Date.now(); let c = cacheP52.get(ds);
+      if(!(c && agora - c.t < 30000)){ c = {t:agora}; c.p = _ps.apply(this, arguments); cacheP52.set(ds, c); c.p.catch(()=>cacheP52.delete(ds)); }
+      return clone(await c.p);
+    };
+    /* gravou? descarta o cache correspondente imediatamente */
+    const invalidar = k => { k = String(k||''); if(window.dsInvalidarMes && (k.indexOf('checklist:')===0 || k.indexOf('efetivo:')===0)) window.dsInvalidarMes();
+      if(k.indexOf('checklist:')===0) cacheChk.delete(k.slice(10));
+      else if(k === 'efetivo:colaboradores') cacheCol = null;
+      else if(k.indexOf('efetivo:')===0) cacheEf.delete(k.slice(8));
+      else if(k.indexOf('p52:status:')===0) cacheP52.delete(k.slice(11)); };
+    ['set','delete'].forEach(m=>{
+      const o = window.storage[m];
+      window.storage[m] = function(k){ invalidar(k); const r = o.apply(this, arguments); return (r && r.then) ? r.then(v=>{ invalidar(k); return v; }) : r; };
+    });
+
+    window.dsInvalidarChecklist = ds => { cacheChk.delete(ds); };   // o listener do Plano 52 avisou mudança → próxima leitura é fresca
+    /* pré-carga leve (chamada pelo Início depois de pronto): deixa Efetivo e Plano 52 com os dados já à mão */
+    window.dsPrefetch = function(){
+      try{ loadColaboradores().catch(()=>{}); }catch(e){}
+      try{ p52GetWeekDates(0).forEach(d=>{ p52LoadStatusDay(p52DateStr(d)).catch(()=>{}); }); }catch(e){}
+    };
+
+    /* 2) solicitações: leitura única e viva */
+    let vivo = false, iniciando = null;
+    const _er = ensureRequestsLoaded;
+    ensureRequestsLoaded = function(){
+      if(vivo) return Promise.resolve();
+      if(iniciando) return iniciando;
+      iniciando = (async()=>{
+        try{ await migrateOldRequestsIfNeeded(); }catch(e){}
+        await new Promise(res=>{
+          let fim = false; const ok = ()=>{ if(!fim){ fim = true; res(); } };
+          try{
+            fbRequestsRef.on('value', snap=>{
+              _requests = snap.exists() ? Object.values(snap.val()) : []; _reqLoadTs = Date.now(); _reqLoaded = true; vivo = true;
+              if(window.dsAtualizarPendentes) window.dsAtualizarPendentes();
+              ok();
+            }, err=>{ console.warn('[Desempenho] lista viva indisponível; usando leitura normal', err); ok(); });
+          }catch(e){ ok(); }
+          setTimeout(ok, 20000);
+        });
+        if(!vivo) await _er();                            // reserva: comportamento original
+      })().finally(()=>{ iniciando = null; });
+      return iniciando;
+    };
+  }catch(erro){ console.error('[Desempenho] módulo desativado por erro (o sistema segue como antes):', erro); }
+})();
+</script>
+
 </body>
 </html>
