@@ -4751,9 +4751,10 @@ async function loadEfetivo(ds){ try{ const s=await window.storage.get('efetivo:'
 async function saveEfetivo(ds,data){ try{ if(window.efDim) window.efDim.snapshot(ds,data); await window.storage.set('efetivo:'+ds,JSON.stringify(data),true); }catch(e){} }
 async function loadColaboradores(){
   try{
-    const s = await window.storage.get('efetivo:colaboradores', true);
-    const existing = s ? JSON.parse(s.value) : [];
-    if(existing.length > 0) return existing;
+    window.__colabErro = false;
+    const lido = await lerColabServidor();          // falha de leitura lança exceção: nunca é confundida com "lista vazia"
+    if(lido.existe){ window.__colabBase = JSON.parse(JSON.stringify(lido.lista)); return lido.lista; }
+    // o cadastro NUNCA foi criado no servidor: grava a lista inicial uma única vez (somente se continuar inexistente)
     const seed = [
       {"nome":"ALAN DIEGO DE SOUZA","cargo":"","status":"ativo"},
       {"nome":"ALEXANDRA SANTOS CARDOSO DORNE","cargo":"","status":"ativo"},
@@ -4794,11 +4795,79 @@ async function loadColaboradores(){
       {"nome":"WALACE FERREIRA RODRIGUES","cargo":"","status":"ativo"},
       {"nome":"YAGO BRAGA LOUZANIS","cargo":"","status":"ativo"}
     ];
-    await window.storage.set('efetivo:colaboradores', JSON.stringify(seed), true);
-    return seed;
-  }catch(e){ return []; }
+    await fbRoot.child(encodeKey(COLAB_KEY)).transaction(cur => cur === null ? JSON.stringify(seed) : undefined);
+    const rel = await lerColabServidor(); window.__colabBase = JSON.parse(JSON.stringify(rel.lista || seed)); return rel.lista || seed;
+  }catch(e){
+    console.error('[Efetivo] Falha ao ler o cadastro de colaboradores (NADA foi alterado):', e);
+    window.__colabErro = true; return window.__colabBase ? JSON.parse(JSON.stringify(window.__colabBase)) : [];
+  }
 }
-async function saveColaboradores(list){ try{ await window.storage.set('efetivo:colaboradores',JSON.stringify(list),true); }catch(e){} }
+/* ── Cadastro de colaboradores: leitura e gravação seguras ──
+   • leitura: falha de rede/tempo esgotado NÃO recria a lista (antes, a lista inicial era regravada por cima do cadastro real);
+   • gravação: saveColaboradores() recebe a lista alterada na tela, descobre O QUE mudou em relação ao que a tela carregou
+     (cadastro novo / situação ou dados alterados / remoção) e aplica só essa mudança, de forma ATÔMICA, sobre a versão mais recente
+     do servidor — o que outra pessoa ou outra tela gravou antes NÃO é desfeito por uma tela desatualizada;
+   • só termina com sucesso depois que o servidor confirma; se não confirmar, avisa e lança erro (os módulos que dependem do
+     salvamento, como mover documentos de um colaborador renomeado, então não rodam). */
+const COLAB_KEY = 'efetivo:colaboradores';
+async function lerColabServidor(){
+  const snap = await withTimeout(fbRoot.child(encodeKey(COLAB_KEY)).get(), 15000);
+  if(!snap.exists()) return {lista:null, existe:false};
+  let v = snap.val(); if(typeof v === 'string') v = JSON.parse(v);
+  return {lista: Array.isArray(v) ? v : [], existe:true};
+}
+async function saveColaboradores(list){
+  const falha = (msg) => { alert(msg); const e = new Error('colaboradores: não salvo'); e.naoSalvo = true; throw e; };
+  if(window.__colabErro) falha('Não foi possível carregar o cadastro de colaboradores. Atualize a página (F5) antes de alterar, para não perder dados.');
+  const nm = p => (p && p.nome) || p;
+  const base = window.__colabBase || [];
+  const novo = (list || []).map(p => typeof p === 'object' ? p : {nome:p});
+  // o que mudou na tela em relação ao que ela carregou
+  const ops = [];
+  if(novo.length === base.length){
+    novo.forEach((p,i)=>{ if(JSON.stringify(p) !== JSON.stringify(base[i])) ops.push({op:'update', de:nm(base[i]), para:p}); });
+  } else if(novo.length === base.length + 1){
+    const nomesBase = new Set(base.map(nm)); novo.forEach(p=>{ if(!nomesBase.has(nm(p))) ops.push({op:'add', para:p}); });
+  } else if(novo.length === base.length - 1){
+    const nomesNovo = new Set(novo.map(nm)); base.forEach(p=>{ if(!nomesNovo.has(nm(p))) ops.push({op:'remove', de:nm(p)}); });
+  } else falha('Alteração não reconhecida no cadastro. Atualize a página (F5) e tente de novo.');
+  if(!ops.length) return;
+  let motivo = null;
+  try{
+    const ref = fbRoot.child(encodeKey(COLAB_KEY));
+    const res = await Promise.race([
+      ref.transaction(cur=>{
+        motivo = null;
+        if(cur === null) return cur;                       // 1ª chamada sem dado local: o Firebase refaz com o valor real do servidor
+        let lista; try{ lista = typeof cur === 'string' ? JSON.parse(cur) : cur; }catch(e){ motivo = 'O cadastro está ilegível. Atualize a página.'; return; }
+        if(!Array.isArray(lista)){ motivo = 'O cadastro está ilegível. Atualize a página.'; return; }
+        lista = lista.slice();
+        for(const o of ops){
+          if(o.op === 'add'){
+            if(lista.some(p=>nm(p) === nm(o.para))){ motivo = 'Já cadastrado.'; return; }
+            lista.push(o.para); lista.sort((a,b)=>String(nm(a)).localeCompare(String(nm(b))));
+          } else {
+            const i = lista.findIndex(p=>nm(p) === o.de);
+            if(o.op === 'remove'){ if(i >= 0) lista.splice(i,1); continue; }      // já removido por outra pessoa: nada a fazer
+            if(i < 0){ motivo = 'Este colaborador não foi encontrado: o cadastro foi alterado por outra pessoa. Atualize a tela e tente de novo.'; return; }
+            if(nm(o.para) !== o.de && lista.some((p,k)=>k !== i && nm(p) === nm(o.para))){ motivo = 'Já existe outro colaborador com esse nome.'; return; }
+            lista[i] = Object.assign({}, typeof lista[i] === 'object' ? lista[i] : {nome:lista[i]}, o.para);
+          }
+        }
+        return JSON.stringify(lista);
+      }),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('__sem_confirmacao__')), 20000))
+    ]);
+    if(!res.committed) falha(motivo || 'Não foi possível salvar. Nada foi alterado — tente novamente.');
+    if(res.snapshot.val() === null) falha('O cadastro de colaboradores ainda não foi inicializado. Atualize a página (F5) e tente de novo.');
+    try{ const v = res.snapshot.val(); window.__colabBase = JSON.parse(JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v)); }catch(e){}
+  }catch(e){
+    if(e && e.naoSalvo) throw e;
+    if(e && e.message === '__sem_confirmacao__') falha('O servidor não confirmou a gravação (conexão lenta ou sem internet). Se a conexão voltar, a alteração ainda pode ser enviada: recarregue a página e confira antes de repetir.');
+    console.error('[Efetivo] Falha ao gravar o cadastro de colaboradores', e);
+    falha('Não foi possível salvar. Nada foi alterado — tente novamente.');
+  }
+}
 function turnosEfetivoDia(date){ return window.efDim ? window.efDim.turnosDoDia(date) : activeTurns(date); }
 
 async function renderEfetivo(){
@@ -5323,7 +5392,7 @@ async function renderEfetivo(){
     if(!nome) return; if(!cargo){document.getElementById('novoColabCargo').focus();return;}
     if(colabs.find(p=>(p.nome||p)===nome)){alert('Já cadastrado.');return;}
     colabs.push({nome,cargo,status:'ativo'}); colabs.sort((a,b)=>(a.nome||a).localeCompare(b.nome||b));
-    await saveColaboradores(colabs); document.getElementById('novoColab').value=''; document.getElementById('novoColabCargo').value='';
+    try{ await saveColaboradores(colabs); document.getElementById('novoColab').value=''; document.getElementById('novoColabCargo').value=''; }catch(e){ if(!e.naoSalvo) console.error(e); }
     renderEfetivo('contratado');
   });
 
@@ -5338,7 +5407,7 @@ async function renderEfetivo(){
   app.querySelectorAll('[data-status-colab]').forEach(sel=>{
     sel.addEventListener('change',async()=>{
       const i=parseInt(sel.getAttribute('data-status-colab')); colabs[i].status=sel.value;
-      await saveColaboradores(colabs); renderEfetivo('contratado');
+      try{ await saveColaboradores(colabs); }catch(e){ if(!e.naoSalvo) console.error(e); } renderEfetivo('contratado');
     });
   });
 
@@ -5364,7 +5433,7 @@ async function renderEfetivo(){
         </td>`;
       document.getElementById('edit-save-'+i)?.addEventListener('click',async()=>{
         const nn=document.getElementById('edit-nome-'+i).value.trim(), nc=document.getElementById('edit-cargo-'+i).value, ns=document.getElementById('edit-status-'+i).value;
-        if(!nn) return; colabs[i]={nome:nn,cargo:nc,status:ns}; await saveColaboradores(colabs); renderEfetivo('contratado');
+        if(!nn) return; colabs[i]={nome:nn,cargo:nc,status:ns}; try{ await saveColaboradores(colabs); }catch(e){ if(!e.naoSalvo) console.error(e); } renderEfetivo('contratado');
       });
       document.getElementById('edit-cancel-'+i)?.addEventListener('click',()=>renderEfetivo('contratado'));
     });
@@ -5374,7 +5443,7 @@ async function renderEfetivo(){
     btn.addEventListener('click',async()=>{
       const i=parseInt(btn.getAttribute('data-rmcolab'));
       if(!confirm('Remover "'+colabs[i].nome+'"?'))return;
-      colabs.splice(i,1); await saveColaboradores(colabs); renderEfetivo('contratado');
+      colabs.splice(i,1); try{ await saveColaboradores(colabs); }catch(e){ if(!e.naoSalvo) console.error(e); } renderEfetivo('contratado');
     });
   });
 
@@ -11395,13 +11464,6 @@ body.ds-periodo .topbar .controls > div[style*="column"], body.ds-periodo #homeP
       }
       return clone(await c.p);
     };
-    /* 1c) colaboradores (lista usada pelo Efetivo) */
-    let cacheCol = null; const _lc = loadColaboradores;
-    loadColaboradores = async function(){
-      const agora = Date.now();
-      if(!(cacheCol && agora - cacheCol.t < 60000)){ cacheCol = {t:agora}; cacheCol.p = _lc.apply(this, arguments); cacheCol.p.catch(()=>{ cacheCol = null; }); }
-      return clone(await cacheCol.p);
-    };
     /* 1d) status do Plano 52 por dia */
     const cacheP52 = new Map(), _ps = p52LoadStatusDay;
     p52LoadStatusDay = async function(ds){
@@ -11412,7 +11474,6 @@ body.ds-periodo .topbar .controls > div[style*="column"], body.ds-periodo #homeP
     /* gravou? descarta o cache correspondente imediatamente */
     const invalidar = k => { k = String(k||''); if(window.dsInvalidarMes && (k.indexOf('checklist:')===0 || k.indexOf('efetivo:')===0)) window.dsInvalidarMes();
       if(k.indexOf('checklist:')===0) cacheChk.delete(k.slice(10));
-      else if(k === 'efetivo:colaboradores') cacheCol = null;
       else if(k.indexOf('efetivo:')===0) cacheEf.delete(k.slice(8));
       else if(k.indexOf('p52:status:')===0) cacheP52.delete(k.slice(11)); };
     ['set','delete'].forEach(m=>{
