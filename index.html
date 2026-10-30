@@ -11515,5 +11515,770 @@ body.ds-periodo .topbar .controls > div[style*="column"], body.ds-periodo #homeP
 })();
 </script>
 
+<script>
+/* =====================================================================
+   IMPRESSÃO DO PLANO FÍSICO DE LIMPEZA — por local, semana e turno
+   ---------------------------------------------------------------------
+   • Módulo COMPLEMENTAR: não altera nenhum dado, regra, cadastro nem tela.
+     Só LÊ o que o Plano de Limpeza já usa:
+       getLocationsForDate(d)  → áreas e frequências vigentes na data
+       activeTurns(d)          → turnos do dia (Par/Ímpar)
+       resolveFreq(loc,k,d)    → quantidade de periodicidades no dia/turno
+       occDeadline / getShiftWindow / loc.meals → janelas de cada periodicidade
+       ambTipoDoLocal / p52Atividades / p52IsPlanned → checklist do local
+   • Nada é gravado no Firebase. Nada é marcado como realizado.
+   • Desligar: acrescente ?semimpressao=1 à URL.
+   ===================================================================== */
+(function(){
+  'use strict';
+  if(window.__ppInstalado) return;
+  if(new URLSearchParams(location.search).get('semimpressao')==='1'){ console.warn('[Impressão] módulo desligado por ?semimpressao=1'); return; }
+  window.__ppInstalado = true;
+
+  const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHAAAABPCAMAAAAEErEBAAADAFBMVEUAAADx9PHxyQrt6vLu0wg4NnLsyCwxKVFNRVBQRzA0NFBLOUxMRmsyKWvQuDPV1+pLODEyKTJEO2xVVVXy9dlURhHr0yy1t83RuEprWE3IxtM3NXM2NjHVxS+vqsrZ5exQORBrWDFvVw7OyepsZ4s4NnPl2vB2ZTCulzIAAH+1pDOMiKrYxxNsZ3OLdy+TlrDGqDLIqEw6OGw6OW1zd43T1tU6OHA5N3NWU1GLh5Oxl01aUjVUVXGpp7Pox0kAAP9GKUxqSQ2MdUrmvDAAAFVyZFA2JxDZxUja0w/q6NmJdhKThi7FutNIKjGHaRE5Q1OHZzKZh1CniDK3xNFDPGlJR2aJZ0+umBRYWIppVnSGenCWlpS0o0trVo51Zg+xtbfJuutTSYd6eK2FepaFeajPuBjxvgrlukk3NQ86OWpoSixzdHTQtmzd9PUwGkypiUtIRlFHQmmVhROZk8WkmbCnmcnHqGVFOWZoSEx/f395g5EtGyw7OztHKxNaUxJkPRBjS22XpLQyHBVIOYaUhWy4pRja0i9VAFVGO1l7dC2FbZikhxmmiWmwk2y6t+bGpBrp0kcAAKoxLnYvLXlCK2lAOm5VVapjOSmDXTKdkymid0awomrNyLQ2LGgyKoc3N1hAPGtYWDFaZ3J/AH93dFynlJW7tDTCmTbDlk3ax2wZFUUcLWw2HXMxLnc2RBs4QSs6SGJCHi5fPz9kO0dva6J/fwB9g6SEaGePecyRl3CdpcGpfCmxqI+1pO+4xbnLnBzBrdTj3dsAAD8fJi8fNVAAVVUyLnorK4I/P1wwMIU/O4AzTEw8QGo+UERVAKpAG0VHP19VVX9TZl1eY4pdcHhVqgB/AABpT4FmZgB/cRmJXlOCX2GCZryIhcafk16Zo5ykeWKgj6ahjMKole2/shq5sUqysZq+0sHCrOXCtbrQ1rPa493/AP/iqiPpt2PlyWbky+L25RL//wD///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU6Is1AAAA/3RSTlMA//////j///7+/v7//v///v7+A//9/////v/Q/v////7+/v//r//+/wL////+/////zBO//9xkP7///7///8B/v7//wP+/v////////7//v////8tFv7///7///////////////////4U/v//////DDD//////xb/Av/+BP79/v7///////8DGP//////////AytR/1ED/f//////Ef8Mbwb/Av///////////3T//f/9CP//Av///////////////wT//wOeLyxF/wo3/AP/IAb///8DAv8F/////////////////////////wH//////wEBAAAAAAAAAAAAAADZdV04AAARCUlEQVR42q1a9X8bWZKXLbfUrW6rW22LmSxZaNmyLckyyZGZ7RhipoDjiTPhySSZ8Exokh3YwR2mpVtmvrvdY2Zm5rt/4Oq97hbYSjYzO/WDPoLW+3Z9C15VvZbJHkpqq6qqpPf/uxdkchJejv6B9N2TVVW1so9NHhOw/vh0fUNTs9drNpsJLPDG621uen7y0TfxBeeq2j8GtKo96PVQQ5NXgOF5plB4HkN7mxp+G91W7bmfDbPqMXh5qqHZi1YlSQqJEUt2amrK5wShKI6maYza3HAUs/9R0drRP08/jzUjWy5c0GodWq220+Xz+UYFGXa5OrUOhwO+dDlJpKv3jUPoPj+KPdGNvvl8M3BIcg6ta3Gxv7//2LFb09PTgUCdJD+Aj9PHjvX3Dw8PuzodDg5hPr9XpOZDwX0SqGwyg8XIzc0nOjtdkXF/nVptDZXvlIre0MbGtenxyKiz84lO0JMnzG9Mgt++/WHwAK4elCO1jk7X6NTL2x/EYoYDXQoFAtiBh6RcYTUYYqnUdma08wkHBdw218tkex7af4DMyWaCpymXyzXc768zHDjQplBguF2AAqQOfm0zAOh4BOzqomieaJ7ECz0Mm7Wyo02gXafjiRfHgcbdLBbj5d6he1K3GerGh4Fb8Nvmp2Cxh1KvwUxz3KZz6q/vxA4oMGUFsn8/WroEcIWoapvh/e+Mdna+AFo2YeM8WPbInvIi7TpHt09tISZ34JXvR5p0iaLIMS0CVpRjcmNYS5Lw/rKs9oGWBAYawFU6F8Fy6jadYrcSmDp1XQzJqVNbWwd2YIrcqutuDbu0WgIpuedBdJ5rJkiXy+evs1ordpApqhCCGDg2DMGP8k146uXxH/xHl+RPub/odIqNu7dcrgs04T0qe/J+eJ+QHfKSWq1z7JWtnjZrKFQIKS4WUqv9/S6to7u7W4NkyOEa/s77MSFkKiQR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';
+  const ESC = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const T1KEYS = ['T1D','T2D'];                       // chaves diurnas (Par / Ímpar)
+  const PREF_AREA = 'sistemaLimpeza:impressaoArea';
+  const p2 = n => String(n).padStart(2,'0');
+  const hhmm = d => p2(d.getHours())+':'+p2(d.getMinutes());
+  const ddmm = d => p2(d.getDate())+'/'+p2(d.getMonth()+1);
+  const ddmmaaaa = d => ddmm(d)+'/'+d.getFullYear();
+  const dia0 = d => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+  const somaDias = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
+  const segundaDe = d => { const x = dia0(d); return somaDias(x, -((x.getDay()+6)%7)); };
+
+  /* Limites de usabilidade física (mm) */
+  const FORMATOS = {
+    A4: {w:297, h:210, nome:'A4'},
+    A3: {w:420, h:297, nome:'A3'},
+  };
+  const MARGEM = 7, COL_DIA = 12, COL_DATA = 16, CAMPO_MIN = 11;   // campo HH:MM manuscrito ≥ 11 mm
+  const capacidade = f => Math.floor((FORMATOS[f].w - 2*MARGEM - COL_DIA - COL_DATA - 1) / (2*CAMPO_MIN));
+
+  /* ───────────────────── LEITURA DO PLANEJAMENTO ───────────────────── */
+  function semanasDoMes(a, m){
+    const ini = new Date(a, m, 1), fim = new Date(a, m+1, 0), out = [];
+    for(let s = segundaDe(ini); s <= fim; s = somaDias(s, 7)) out.push(s);
+    return out;
+  }
+  function diasDoMes(a, m){
+    const out = [], n = new Date(a, m+1, 0).getDate();
+    for(let i=1;i<=n;i++) out.push(new Date(a, m, i));
+    return out;
+  }
+  /* chave do turno (T1D/T2D/T1N/T2N) que vale no dia, para T1 ou T2 */
+  function chaveDoTurno(d, qual){
+    const t = (activeTurns(d)||[]).find(t => qual==='T1' ? T1KEYS.includes(t.key) : !T1KEYS.includes(t.key));
+    return t ? t.key : null;
+  }
+  function localNoDia(nome, d){ return (getLocationsForDate(d)||[]).find(l => l.name===nome) || null; }
+  function qtdNoDia(nome, d, qual){
+    const loc = localNoDia(nome, d), k = chaveDoTurno(d, qual);
+    if(!loc || !k) return 0;
+    const n = Number(resolveFreq(loc, k, d)) || 0;
+    return n > 0 ? Math.floor(n) : 0;
+  }
+  /* áreas do mês, na ordem do cadastro vigente (inclui áreas que existiram só em parte do mês) */
+  function areasDoMes(a, m){
+    const vistos = new Set(), out = [];
+    diasDoMes(a, m).reverse().forEach(d => (getLocationsForDate(d)||[]).forEach(l => {
+      if(!vistos.has(l.name)){ vistos.add(l.name); out.push(l.name); }
+    }));
+    return out;
+  }
+  function maxNoMes(nome, a, m){
+    let mx = 0;
+    semanasDoMes(a, m).forEach(s => { for(let i=0;i<7;i++){ const d = somaDias(s,i); ['T1','T2'].forEach(q => { mx = Math.max(mx, qtdNoDia(nome, d, q)); }); } });
+    return mx;
+  }
+  /* janela de cada periodicidade, usando a MESMA regra de prazo do sistema */
+  function janela(loc, k, idx, d){
+    try{
+      if(loc.meals && loc.meals[k] && loc.meals[k][idx]){
+        const m = loc.meals[k][idx];
+        return {rot: m.label||'', txt: p2(m.start[0])+':'+p2(m.start[1])+'–'+p2(m.end[0])+':'+p2(m.end[1])};
+      }
+      const fim = occDeadline(loc, k, idx, d); if(!fim) return null;
+      const ini = idx===0 ? getShiftWindow(k, d).start : occDeadline(loc, k, idx-1, d);
+      return ini ? {rot:'', txt: hhmm(ini)+'–'+hhmm(fim)} : null;
+    }catch(e){ return null; }
+  }
+
+  /* checklist do local — mesma ordem de precedência do checklist do tablet */
+  async function garantirAtividades(){
+    try{
+      if(typeof p52Atividades!=='undefined' && !p52Atividades.length){
+        if(!p52Meta) p52Meta = await p52LoadMeta();
+        p52Atividades = await p52LoadAtividades();
+      }
+    }catch(e){ console.warn('[Impressão] atividades do Plano 52 indisponíveis', e); }
+  }
+  function checklistDo(nome, k, d){
+    try{
+      const tipo = ambTipoDoLocal(nome);
+      if(tipo) return ambItensDo(tipo).map(i => i.texto);
+      if(typeof p52Atividades==='undefined' || !p52Atividades.length) return null;     // não foi possível ler
+      const areas = p52ResolveLocalToAreas(nome);
+      if(!areas.length) return [];
+      const filtro = T1KEYS.includes(k) ? '1T' : '2T';
+      const at = p52Atividades.filter(a => areas.includes(a.area) &&
+        (String(a.turno||'').includes(filtro) || String(a.turno||'').includes('1T/2T')) && p52IsPlanned(a, d));
+      if(!at.length) return [];
+      if(at.every(a => ambEhGenerico(a.atividade))){
+        const t = ambTipoPlanoPadrao();
+        if(t) return ambItensDo(t).map(i => i.texto);
+      }
+      const vistos = new Set();
+      return at.map(a => String(a.atividade||'').trim()).filter(t => { const s = t.toLowerCase(); if(!t || vistos.has(s)) return false; vistos.add(s); return true; });
+    }catch(e){ console.warn('[Impressão] checklist', e); return null; }
+  }
+  /* junta a lista dos dias da semana; itens que não valem em todos os dias recebem os dias */
+  function consolidarChecklist(listas){
+    if(!listas.length) return {estado:'sem-dias', itens:[]};
+    if(listas.some(l => l.itens===null)) return {estado:'indisponivel', itens:[]};
+    const ordem = [], dias = new Map();
+    listas.forEach(l => l.itens.forEach(t => {
+      if(!dias.has(t)){ dias.set(t, []); ordem.push(t); }
+      dias.get(t).push(l.d.getDay());
+    }));
+    if(!ordem.length) return {estado:'sem-checklist', itens:[]};
+    const total = listas.length;
+    return {estado:'ok', itens: ordem.map(t => {
+      const ds = dias.get(t);
+      return {texto:t, nota: ds.length < total ? [...new Set(ds)].sort((a,b)=>((a+6)%7)-((b+6)%7)).map(x=>DIAS[x]).join(', ') : ''};
+    })};
+  }
+
+  function montarSemana(nome, seg){
+    const dias = Array.from({length:7}, (_,i) => somaDias(seg, i));
+    const turnos = ['T1','T2'].map(q => {
+      const linhas = dias.map(d => {
+        const loc = localNoDia(nome, d), k = chaveDoTurno(d, q);
+        const n = (loc && k) ? qtdNoDia(nome, d, q) : 0;
+        return {d, k, loc, n};
+      });
+      const N = Math.max(0, ...linhas.map(l => l.n));
+      const cols = [];
+      for(let i=0;i<N;i++){
+        const jans = new Set(), rots = new Set();
+        linhas.forEach(l => { if(l.n > i){ const j = janela(l.loc, l.k, i, l.d); if(j){ jans.add(j.txt); if(j.rot) rots.add(j.rot); } } });
+        cols.push({janela: jans.size===1 ? [...jans][0] : (jans.size>1 ? 'varia conforme o dia' : ''), rotulo: rots.size===1 ? [...rots][0] : ''});
+      }
+      const ativos = linhas.filter(l => l.n > 0);
+      const qtds = [...new Set(ativos.map(l => l.n))];
+      const lista = consolidarChecklist(ativos.map(l => ({d:l.d, itens: checklistDo(nome, l.k, l.d)})));
+      return {q, linhas, N, cols, ativos: ativos.length, qtds, lista};
+    });
+    return {nome, seg, dias, turnos};
+  }
+
+  /* ───────────────────── FOLHA (HTML de impressão) ───────────────────── */
+  const ICO = {
+    sol:'<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7 7 17M17 7l1.7-1.7"/></svg>',
+    lua:'<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>',
+    cal:'<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
+    escudo:'<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8 7.5 9.5 4.3-1.5 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12.2 2.3 2.3 4.2-4.4"/></svg>',
+  };
+
+  function cssFolha(fmt){
+    const F = FORMATOS[fmt];
+    return `
+@page{size:${F.nome} landscape;margin:0}
+html,body{margin:0;padding:0;background:#fff}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1d2652;font-size:8pt;line-height:1.2}
+.folha{width:${F.w}mm;height:${F.h}mm;padding:${MARGEM}mm;display:flex;flex-direction:column;gap:2.2mm;overflow:hidden;position:relative;background:#fff;page-break-after:always;break-after:page}
+.folha:last-child{page-break-after:auto;break-after:auto}
+/* cabeçalho */
+.cab{display:flex;align-items:stretch;gap:3mm;height:19mm;flex:0 0 19mm}
+.marca{display:flex;align-items:center;gap:2mm;flex:0 0 auto;padding-right:3mm;border-right:.35mm solid #d7dbe7}
+.marca img{height:11mm;width:auto;display:block}
+.marca b{font-size:13pt;line-height:.95;font-weight:800;color:#2d3277;letter-spacing:-.3px}
+.tit{display:flex;flex-direction:column;justify-content:center;flex:0 0 auto;border-bottom:.6mm solid #ffe600;padding-bottom:.6mm}
+.tit h1{margin:0;font-size:15pt;font-weight:800;color:#2d3277;letter-spacing:-.2px;line-height:1.05}
+.tit h2{margin:.4mm 0 0;font-size:8.5pt;font-weight:600;color:#2d3277;letter-spacing:.2px}
+.info{flex:1 1 auto;display:grid;grid-template-columns:1.55fr 1fr;grid-template-rows:1fr 1fr;gap:1.4mm;min-width:0}
+.cx-i{border:.3mm solid #cfd5e4;border-radius:1.4mm;padding:.8mm 2mm;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.cx-i small{font-size:5.6pt;font-weight:700;color:#5a6488;letter-spacing:.3px;text-transform:uppercase}
+.cx-i b{font-size:8.6pt;font-weight:700;color:#1d2652;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cx-i .ln{border-bottom:.3mm solid #9aa3bf;height:3.6mm}
+.selo{flex:0 0 auto;min-width:43mm;background:#fff159;border-radius:1.6mm;padding:1.4mm 2.6mm;display:flex;align-items:center;gap:2mm;color:#2d3277}
+.selo i{display:block;width:7mm;height:7mm;flex:0 0 7mm}
+.selo div{display:flex;flex-direction:column;align-items:flex-end;text-align:right;width:100%}
+.selo b{font-size:7.4pt;font-weight:800;letter-spacing:.2px}
+.selo span{font-size:8.6pt;font-weight:700;margin-top:.3mm}
+.selo em{font-style:normal;font-size:6.4pt;margin-top:.5mm;opacity:.85}
+/* blocos de turno */
+.bloco{border:.35mm solid var(--c);border-radius:1.8mm;overflow:hidden;flex:0 0 auto}
+.bloco.t1{--c:#e8c200;--h:#fff8cc;--h2:#fffbe3}
+.bloco.t2{--c:#8ea2d8;--h:#e4eafb;--h2:#f1f4fd}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th,td{padding:0;border:.2mm solid #d9deea;text-align:center;vertical-align:middle}
+thead th{background:var(--h2);color:#1d2652}
+th.tt{background:var(--h);text-align:left;padding:0 1.4mm;border-right:.35mm solid var(--c)}
+.tt-in{display:flex;align-items:center;gap:1.2mm;overflow:hidden}
+.tt-in i{display:block;width:5.2mm;height:5.2mm;flex:0 0 5.2mm;color:#2d3277}
+.tt-in div{min-width:0}
+.tt-in b{display:block;font-size:8.4pt;font-weight:800;color:#2d3277;line-height:1.2;white-space:nowrap}
+.tt-in span{display:block;font-size:5.9pt;color:#3b4570;margin-top:.5mm;white-space:nowrap;line-height:1.15}
+th.per{padding:.6mm .8mm;border-left:.35mm solid #c6cde0}
+.per-in{display:flex;flex-direction:column;align-items:center;gap:.3mm}
+.per-n{display:inline-flex;align-items:center;justify-content:center;width:4.4mm;height:4.4mm;border-radius:50%;background:#2d3277;color:#fff;font-size:7pt;font-weight:800}
+.per-t{font-size:6.6pt;font-weight:800;letter-spacing:.2px;color:#1d2652;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.per-j{font-size:6.2pt;color:#47517a;white-space:nowrap}
+th.sub{font-size:6.2pt;font-weight:700;color:#47517a;background:#fff}
+th.sub.dd{background:#2d3277;color:#fff;letter-spacing:.3px}
+th.sub.ini{border-left:.35mm solid #c6cde0}
+td.dia{font-weight:800;font-size:8pt;color:#2d3277;background:#f6f7fb}
+td.data{font-size:8pt;color:#1d2652;border-right:.35mm solid var(--c)}
+td.data.fora{color:#6b7495}
+td.c{padding:.55mm .7mm}
+td.c.ini{border-left:.35mm solid #c6cde0}
+.cx{height:var(--ch);border:.3mm solid #c3cadc;border-radius:1mm;background:#fff;display:flex;align-items:center;justify-content:center}
+.cx span{color:#c9cfdd;font-size:9pt;font-weight:700}
+.cx.np{border:.25mm dashed #c9cfdd;background:repeating-linear-gradient(135deg,#f1f3f8 0 1.1mm,#fff 1.1mm 2.2mm)}
+.cx.np span{color:#9aa2bd;font-size:5.6pt;font-weight:600;letter-spacing:.2px}
+.vazio{border:.3mm dashed #c3cadc;border-radius:1.8mm;padding:2mm 3mm;display:flex;align-items:center;gap:2mm;color:#47517a;font-size:7.6pt;flex:0 0 auto}
+.vazio i{display:block;width:5mm;height:5mm;color:#2d3277}
+.vazio b{color:#2d3277}
+/* rodapé */
+.rod{display:flex;gap:2.2mm;flex:0 0 auto;margin-top:auto}
+.rod > div{border:.3mm solid #cfd5e4;border-radius:1.6mm;padding:1.4mm 2mm;min-width:0}
+.leg{flex:0 0 52%;display:flex;flex-direction:column;gap:.8mm;overflow:hidden}
+.leg-t{align-self:flex-start;background:#fff159;color:#2d3277;font-size:6.6pt;font-weight:800;letter-spacing:.3px;padding:.5mm 1.8mm;border-radius:.8mm}
+.leg p{margin:0;font-size:6.6pt;color:#3b4570}
+.leg h4{margin:.4mm 0 0;font-size:6.6pt;color:#2d3277;font-weight:800}
+.leg ol{margin:0;padding:.2mm 0 0;list-style:none;columns:var(--lc);column-gap:3mm;counter-reset:it}
+.leg li{counter-increment:it;font-size:6.6pt;color:#1d2652;display:flex;gap:.9mm;align-items:flex-start;break-inside:avoid;page-break-inside:avoid;margin-bottom:.35mm;line-height:1.2}
+.leg li::before{content:counter(it);flex:0 0 2.7mm;margin-top:.05mm;width:2.7mm;height:2.7mm;border-radius:50%;background:#2d3277;color:#fff;font-size:5pt;font-weight:800;display:flex;align-items:center;justify-content:center}
+.leg li em{font-style:normal;color:#6b7495}
+.obs{flex:1 1 auto;display:flex;flex-direction:column}
+.obs small,.conf small{font-size:5.8pt;font-weight:700;color:#5a6488;letter-spacing:.3px;text-transform:uppercase}
+.obs .linhas{flex:1;margin-top:1mm;background:repeating-linear-gradient(to bottom,transparent 0 4.3mm,#c3cadc 4.3mm 4.6mm)}
+.conf{flex:0 0 17%;display:flex;flex-direction:column;gap:1.2mm;font-size:6.4pt;color:#3b4570}
+.conf .ins{display:flex;gap:1.4mm;align-items:flex-start}
+.conf .ins i{display:block;width:4.6mm;height:4.6mm;flex:0 0 4.6mm;color:#2d3277}
+.conf .ln{display:flex;align-items:flex-end;gap:1mm;white-space:nowrap}
+.conf .ln span{flex:1;border-bottom:.3mm solid #9aa3bf;height:3.4mm}
+.slog{flex:0 0 auto;width:24mm;border:none !important;border-left:.8mm solid #ffe600 !important;border-radius:0 !important;display:flex;flex-direction:column;justify-content:space-between;padding:0 0 0 2mm !important}
+.slog b{font-size:8.6pt;font-weight:800;color:#2d3277;line-height:1.1}
+.slog img{height:8mm;width:auto;align-self:flex-start}
+.carimbo{position:absolute;left:${MARGEM}mm;right:${MARGEM}mm;bottom:2mm;display:flex;justify-content:space-between;font-size:5.6pt;color:#8a92ad}
+`;
+  }
+
+  /* calcula alturas para caber os dois turnos sem espremer os campos */
+  function layoutDaFolha(sem, fmt){
+    const F = FORMATOS[fmt];
+    const internoH = F.h - 2*MARGEM - 2.4;              // 2,4 mm reservados ao carimbo
+    const blocos = sem.turnos.filter(t => t.N > 0), vazios = sem.turnos.filter(t => t.N === 0);
+    // legenda: estima linhas
+    const listas = legendaGrupos(sem);
+    const itensLeg = listas.reduce((a,g) => a.concat(g.itens), []);
+    const lc = itensLeg.length > 12 ? 3 : itensLeg.length > 4 ? 2 : 1;
+    const legW = (F.w - 2*MARGEM) * .52 - 4;            // largura útil da legenda (mm)
+    const colW = (legW - 3*(lc-1)) / lc - 3.6;          // largura útil de cada coluna (mm)
+    const CH = 1.32;                                     // mm por caractere a 6,6 pt (estimativa conservadora)
+    const linhasItens = itensLeg.map(i => Math.max(1, Math.ceil((i.texto.length + (i.nota ? i.nota.length + 11 : 0)) * CH / colW)));
+    // distribui em colunas (aprox.): soma das linhas / colunas, mas nunca menos que o maior item
+    const totLin = linhasItens.reduce((a,b) => a+b, 0);
+    const linhas = itensLeg.length ? Math.max(Math.ceil(totLin / lc) + (lc>1 ? 1 : 0), Math.max(...linhasItens)) : 0;
+    const extras = listas.filter(g => g.estado!=='ok').length * 2;
+    let rodH = 4.2 + 3.4 + 2.4 + (linhas + extras) * 2.95 + 1.2;   // título + frase + respiro + linhas
+    rodH = Math.max(rodH, fmt==='A3' ? 34 : 28.5);
+    rodH = Math.min(rodH, fmt==='A3' ? 70 : 48);
+    const GAP = 2.2;
+    const itens = 1 + blocos.length + vazios.length + 1;
+    let livre = internoH - 19 - rodH - vazios.length*10 - GAP*(itens-1);
+    const cabBloco = 9.5 + 4.2 + .8;
+    let linhaH = blocos.length ? (livre / blocos.length - cabBloco) / 7 : 0;
+    const maxH = fmt==='A3' ? 15 : (blocos.length===1 ? 13 : 11.5);
+    if(linhaH > maxH) linhaH = maxH;
+    const N = Math.max(0, ...sem.turnos.map(t => t.N));
+    const campoW = N ? (F.w - 2*MARGEM - COL_DIA - COL_DATA - 1) / (2*N) : 99;
+    return {rodH, linhaH, lc, listas, apertado: (blocos.length && linhaH < 6.5) || campoW < CAMPO_MIN, campoW, N};
+  }
+
+  /* legenda única: itens dos dois turnos, com a observação de turno/dia quando o item não vale sempre */
+  function legendaGrupos(sem){
+    const ts = sem.turnos.filter(t => t.N > 0);
+    if(!ts.length) return [];
+    const ruins = ts.filter(t => t.lista.estado!=='ok');
+    if(ruins.some(t => t.lista.estado==='indisponivel')) return [{titulo:'', estado:'indisponivel', itens:[]}];
+    const oks = ts.filter(t => t.lista.estado==='ok');
+    if(!oks.length) return [{titulo:'', estado:'sem-checklist', itens:[]}];
+    const ordem = [], mapa = new Map();
+    oks.forEach(t => t.lista.itens.forEach(i => {
+      if(!mapa.has(i.texto)){ mapa.set(i.texto, {}); ordem.push(i.texto); }
+      mapa.get(i.texto)[t.q] = i.nota;
+    }));
+    const itens = ordem.map(texto => {
+      const m = mapa.get(texto), qs = Object.keys(m);
+      let nota = '';
+      if(ts.length > 1 && qs.length < ts.length) nota = qs.map(q => q + (m[q] ? ': '+m[q] : '')).join('; ');
+      else if(qs.length > 1 && m.T1 !== m.T2) nota = qs.map(q => q + ': ' + (m[q] || 'todos os dias')).join('; ');
+      else nota = m[qs[0]] || '';
+      return {texto, nota};
+    });
+    const grupos = [{titulo:'', estado:'ok', itens}];
+    ruins.forEach(t => grupos.push({titulo: t.q==='T1'?'T1 · Manhã':'T2 · Noite', estado:t.lista.estado, itens:[]}));
+    return grupos;
+  }
+
+  function htmlBloco(t, L){
+    const ehT1 = t.q==='T1';
+    if(!t.N){
+      return `<div class="vazio"><i>${ehT1?ICO.sol:ICO.lua}</i><span><b>${ehT1?'T1 · Manhã':'T2 · Noite'}</b> — sem execução prevista para este local nesta semana no planejamento vigente.</span></div>`;
+    }
+    const sub = t.qtds.length===1 ? `${t.qtds[0]}× por dia` : `até ${t.N}× por dia (varia)`;
+    const horario = ehT1 ? '07h às 19h' : '19h às 07h';
+    const colg = `<col style="width:${COL_DIA}mm"><col style="width:${COL_DATA}mm">` + '<col>'.repeat(2*t.N);
+    const h1 = t.cols.map((c,i) => `<th class="per" colspan="2"><div class="per-in"><span class="per-n">${i+1}</span><span class="per-t">${c.rotulo ? ESC(c.rotulo) : (i+1)+'ª periodicidade'}</span><span class="per-j">${c.janela ? ESC(c.janela) : '&nbsp;'}</span></div></th>`).join('');
+    const h2 = t.cols.map(() => `<th class="sub ini">Início</th><th class="sub">Fim</th>`).join('');
+    const corpo = t.linhas.map(l => {
+      let cels = '';
+      if(!l.n){
+        cels = `<td class="c" colspan="${2*t.N}"><div class="cx np"><span>SEM EXECUÇÃO PREVISTA NESTE DIA</span></div></td>`;
+      }else{
+        for(let i=0;i<t.N;i++){
+          if(i < l.n) cels += `<td class="c ini"><div class="cx"><span>:</span></div></td><td class="c"><div class="cx"><span>:</span></div></td>`;
+          else cels += `<td class="c ini" colspan="2"><div class="cx np"><span>NÃO PREVISTA</span></div></td>`;
+        }
+      }
+      return `<tr style="height:${L.linhaH.toFixed(2)}mm"><td class="dia">${DIAS[l.d.getDay()]}</td><td class="data">${ddmm(l.d)}</td>${cels}</tr>`;
+    }).join('');
+    return `<div class="bloco ${ehT1?'t1':'t2'}" style="--ch:${Math.max(4, L.linhaH-1.4).toFixed(2)}mm"><table><colgroup>${colg}</colgroup>
+      <thead><tr style="height:9.5mm"><th class="tt" colspan="2"><div class="tt-in"><i>${ehT1?ICO.sol:ICO.lua}</i><div><b>${ehT1?'T1 · MANHÃ':'T2 · NOITE'}</b><span>${sub}</span><span>${horario}</span></div></div></th>${h1}</tr>
+      <tr style="height:4.2mm"><th class="sub dd">DIA</th><th class="sub dd">DATA</th>${h2}</tr></thead>
+      <tbody>${corpo}</tbody></table></div>`;
+  }
+
+  function htmlLegenda(sem, L){
+    const N = Math.max(...sem.turnos.map(t => t.N));
+    const faixa = N > 1 ? `P1 a P${N}` : 'P1';
+    let html = `<div class="leg" style="--lc:${L.lc}"><span class="leg-t">LEGENDA DAS PERIODICIDADES</span>`;
+    if(!N){
+      html += `<p>Não há periodicidades previstas para este local nesta semana.</p></div>`;
+      return html;
+    }
+    html += `<p><b>${faixa}</b>: cada periodicidade é uma execução completa do checklist abaixo.</p>`;
+    L.listas.forEach(g => {
+      const tit = g.titulo ? `<b>${ESC(g.titulo)}:</b> ` : '';
+      if(g.estado==='ok') html += `<ol>${g.itens.map(i => `<li><span>${ESC(i.texto)}${i.nota?` <em>(somente ${ESC(i.nota)})</em>`:''}</span></li>`).join('')}</ol>`;
+      else if(g.estado==='sem-checklist') html += `<p>${tit}${tit?'sem':'Sem'} checklist de atividades cadastrado para este local; registre cada limpeza conforme o plano.</p>`;
+      else if(g.estado==='indisponivel') html += `<p>${tit}${tit?'não':'Não'} foi possível carregar o checklist agora. Gere a folha novamente com conexão para incluir as atividades.</p>`;
+    });
+    return html + '</div>';
+  }
+
+  function htmlFolha(sem, ctx){
+    const L = layoutDaFolha(sem, ctx.fmt);
+    const fim = somaDias(sem.seg, 6);
+    const blocos = sem.turnos.map(t => htmlBloco(t, L)).join('');
+    return `<section class="folha">
+  <header class="cab">
+    <div class="marca"><img src="${LOGO}" alt=""><b>mercado<br>livre</b></div>
+    <div class="tit"><h1>FACILITIES | MG02</h1><h2>CONTROLE OPERACIONAL DE LIMPEZA</h2></div>
+    <div class="info">
+      <div class="cx-i"><small>Área / Local</small><b>${ESC(sem.nome)}</b></div>
+      <div class="cx-i"><small>Semana</small><b>${ddmmaaaa(sem.seg)} a ${ddmmaaaa(fim)}</b></div>
+      <div class="cx-i"><small>Responsável</small><div class="ln"></div></div>
+      <div class="cx-i"><small>Líder / Fiscal</small><div class="ln"></div></div>
+    </div>
+    <div class="selo"><i>${ICO.cal}</i><div><b>PLANO SEMANAL DE LIMPEZA</b><span>${MESES[ctx.m].toUpperCase()} / ${ctx.a}</span><em>Semana ${ctx.idx+1} de ${ctx.total}</em></div></div>
+  </header>
+  ${blocos}
+  <footer class="rod" style="height:${L.rodH.toFixed(1)}mm">
+    ${htmlLegenda(sem, L)}
+    <div class="obs"><small>Observações / pendências</small><div class="linhas"></div></div>
+    <div class="conf"><div class="ins"><i>${ICO.escudo}</i><span>Registrar o horário de início e término de cada periodicidade conforme a execução. No T2, use a data de início do turno (19h).</span></div>
+      <div class="ln">Conferência do responsável:</div><div class="ln"><span></span></div><div class="ln">Data: <span></span>/<span></span>/<span></span></div></div>
+    <div class="slog"><b>Juntos por<br>um ambiente<br>melhor.</b><img src="${LOGO}" alt=""></div>
+  </footer>
+  <div class="carimbo"><span>Espelho do planejamento digital vigente · gerado em ${ESC(ctx.gerado)}${ctx.usuario?' por '+ESC(ctx.usuario):''}</span><span>A ficha não substitui o lançamento no sistema: a transcrição exige validação do responsável.</span><span>Folha ${ctx.idx+1}/${ctx.total}</span></div>
+</section>`;
+  }
+
+  function documento(semanas, ctx, opcoes){
+    const folhas = semanas.map(s => htmlFolha(s.sem, Object.assign({}, ctx, {idx:s.idx}))).join('\n');
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Plano semanal de limpeza — ${ESC(ctx.area)} — ${MESES[ctx.m]} ${ctx.a}</title><style>${cssFolha(ctx.fmt)}${opcoes&&opcoes.previa?'html,body{overflow:hidden}':''}</style></head><body>${folhas}</body></html>`;
+  }
+
+  /* ───────────────────── INTERFACE ───────────────────── */
+  const IC = {
+    print:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V3.5h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10V20.5H7z"/><path d="M17 11h.01"/></svg>',
+    x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 21s-6-5.6-6-10.5a6 6 0 0 1 12 0C18 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/></svg>',
+    cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>',
+    doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 11h5M10 14h5M10 17h5"/></svg>',
+    ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"/></svg>',
+    esq:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>',
+    dir:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>',
+  };
+
+  const css = document.createElement('style');
+  css.id = 'pp-estilo';
+  css.textContent = `
+.pp-root{--pp-bg:#0f1b1c;--pp-panel:#15282a;--pp-panel2:#1c3436;--pp-line:#2a4547;--pp-text:#e8f3f2;--pp-dim:#8fb0ae;--pp-ac:#ffe600;--pp-ok:#3fd6c9;font-family:'Segoe UI',Arial,sans-serif;}
+body.ds-on .pp-root{--pp-bg:#0a1220;--pp-panel:#101a2c;--pp-panel2:#0d1626;--pp-line:#1e2c45;--pp-text:#e8eef8;--pp-dim:#8c9bb3;--pp-ok:#22d3a0;}
+.pp-btn-abrir{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:8px;border:1.5px solid #ffe600;background:rgba(255,230,0,.08);color:#ffe600;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.pp-btn-abrir svg{width:17px;height:17px}
+.pp-btn-abrir:hover{background:#ffe600;color:#16182b}
+.pp-btn-abrir:focus-visible{outline:2px solid #fff;outline-offset:2px}
+body.ds-on .topbar .pp-btn-abrir{height:36px}
+@media (max-width:768px){.pp-btn-abrir{padding:0 9px;height:32px}.pp-btn-abrir span{display:none}}
+/* painel lateral */
+#ppVeu{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10040;opacity:0;transition:opacity .18s}
+#ppVeu.on{opacity:1}
+#ppPainel{position:fixed;top:0;right:0;bottom:0;width:min(400px,100vw);background:var(--pp-panel);border-left:1px solid var(--pp-line);z-index:10041;display:flex;flex-direction:column;color:var(--pp-text);transform:translateX(100%);transition:transform .2s ease;box-shadow:-12px 0 40px rgba(0,0,0,.35)}
+#ppPainel.on{transform:none}
+@media (prefers-reduced-motion:reduce){#ppPainel,#ppVeu{transition:none}}
+.pp-hd{display:flex;align-items:center;gap:12px;padding:22px 22px 6px}
+.pp-hd svg{width:28px;height:28px;flex:0 0 28px}
+.pp-hd h3{margin:0;font-size:18px;font-weight:700;flex:1}
+.pp-x{width:34px;height:34px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--pp-text);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.pp-x svg{width:18px;height:18px}
+.pp-x:hover{border-color:var(--pp-line)}
+.pp-lead{margin:0;padding:0 22px 14px;font-size:13px;color:var(--pp-dim)}
+.pp-corpo{flex:1;overflow-y:auto;padding:4px 22px 18px}
+.pp-campo{margin-bottom:18px}
+.pp-campo > label,.pp-campo > .pp-lb{display:block;font-size:13px;font-weight:600;margin-bottom:7px;color:var(--pp-text)}
+.pp-sel{position:relative;display:flex;align-items:center}
+.pp-sel > svg{position:absolute;left:12px;width:17px;height:17px;color:var(--pp-dim);pointer-events:none}
+.pp-sel select{width:100%;height:44px;padding:0 12px 0 38px;border-radius:8px;border:1px solid var(--pp-line);background:var(--pp-panel2);color:var(--pp-text);font-size:14px;font-family:inherit;cursor:pointer}
+.pp-sel select:focus{outline:2px solid var(--pp-ac);outline-offset:1px}
+.pp-rad{display:flex !important;align-items:center;gap:10px;padding:8px 2px;cursor:pointer;font-size:14px;font-weight:600;color:var(--pp-text);margin:0 !important}
+.pp-rad input{flex:0 0 18px;width:18px !important;height:18px !important;min-height:0 !important;padding:0 !important;accent-color:#ffe600;margin:0 !important;display:inline-block}
+.pp-rad small{font-weight:400}
+.pp-rad small{color:var(--pp-dim);font-size:12.5px}
+.pp-dica{font-size:12.5px;line-height:1.45;color:var(--pp-dim);background:var(--pp-panel2);border:1px solid var(--pp-line);border-radius:8px;padding:9px 11px;margin-top:4px}
+.pp-dica.alerta{color:#ffe9a6;border-color:rgba(255,230,0,.45);background:rgba(255,230,0,.07)}
+.pp-sep{height:1px;background:var(--pp-line);margin:4px 0 18px}
+.pp-auto{display:flex;gap:14px;border:1px solid var(--pp-line);background:var(--pp-panel2);border-radius:10px;padding:16px}
+.pp-auto > svg{width:34px;height:34px;flex:0 0 34px;color:var(--pp-text)}
+.pp-auto b{display:block;font-size:13.5px;margin-bottom:8px}
+.pp-auto ul{margin:0;padding:0;list-style:none}
+.pp-auto li{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--pp-dim);margin-bottom:6px}
+.pp-auto li svg{width:14px;height:14px;color:var(--pp-ok);flex:0 0 14px}
+.pp-pe{padding:16px 22px 22px;border-top:1px solid var(--pp-line)}
+.pp-gerar{width:100%;height:50px;border:none;border-radius:9px;background:#ffe600;color:#16182b;font-size:15px;font-weight:800;font-family:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px}
+.pp-gerar svg{width:20px;height:20px}
+.pp-gerar:hover{filter:brightness(1.05)}
+.pp-gerar:disabled{opacity:.6;cursor:progress}
+.pp-gerar:focus-visible{outline:2px solid #fff;outline-offset:2px}
+/* prévia */
+#ppPrevia{position:fixed;inset:0;z-index:10050;background:var(--pp-bg);color:var(--pp-text);display:flex;flex-direction:column}
+.pv-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid var(--pp-line);background:var(--pp-panel)}
+.pv-bar h3{margin:0 8px 0 0;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.pv-bar h3 svg{width:20px;height:20px}
+#pvAreaBox{width:300px;flex:0 1 300px;min-width:180px}
+#pvMesBox{width:168px;flex:0 0 168px}
+.pv-bar .pp-sel select{height:36px;font-size:13px}
+.pv-sem{display:flex;align-items:center;gap:4px;background:var(--pp-panel2);border:1px solid var(--pp-line);border-radius:8px;height:36px;padding:0 3px}
+.pv-sem button{width:30px;height:28px;border:none;background:transparent;color:var(--pp-text);border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.pv-sem button svg{width:16px;height:16px}
+.pv-sem button:hover:not(:disabled){background:var(--pp-line)}
+.pv-sem button:disabled{opacity:.3;cursor:default}
+.pv-sem span{font-size:12.5px;padding:0 6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pv-seg{display:flex;background:var(--pp-panel2);border:1px solid var(--pp-line);border-radius:8px;padding:3px;height:36px}
+.pv-seg button{border:none;background:transparent;color:var(--pp-dim);font-weight:700;font-size:12.5px;padding:0 12px;border-radius:6px;cursor:pointer;font-family:inherit}
+.pv-seg button.on{background:#ffe600;color:#16182b}
+.pv-esp{flex:1}
+.pv-b{height:36px;padding:0 14px;border-radius:8px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.pv-b svg{width:16px;height:16px}
+.pv-b.pri{background:#ffe600;border:1px solid #ffe600;color:#16182b}
+.pv-b.sec{background:transparent;border:1px solid var(--pp-line);color:var(--pp-text)}
+.pv-b.sec:hover{border-color:#ffe600}
+.pv-b:disabled{opacity:.55;cursor:progress}
+.pv-aviso{display:none;padding:9px 18px;font-size:13px;background:rgba(255,230,0,.09);border-bottom:1px solid rgba(255,230,0,.35);color:#ffe9a6}
+.pv-aviso.on{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.pv-aviso button{height:28px;padding:0 10px;border-radius:6px;border:1px solid #ffe600;background:transparent;color:#ffe600;font-weight:700;cursor:pointer;font-family:inherit}
+.pv-area{flex:1;overflow:auto;padding:22px;display:flex;justify-content:center;align-items:flex-start;background:var(--pp-bg)}
+.pv-folha{position:relative;flex:0 0 auto;box-shadow:0 10px 36px rgba(0,0,0,.45);background:#fff}
+.pv-folha iframe{border:0;display:block;transform-origin:0 0;background:#fff}
+.pv-carr{padding:60px;text-align:center;color:var(--pp-dim);font-size:14px}
+.pv-dica{padding:8px 18px 10px;font-size:12px;color:var(--pp-dim);border-top:1px solid var(--pp-line);background:var(--pp-panel)}
+@media (max-width:768px){.pv-bar{padding:10px}.pv-bar h3{display:none}#pvAreaBox{flex:1 1 100%;width:auto}#pvMesBox{flex:1 1 auto}.pv-area{padding:10px}.pv-esp{display:none}}
+`;
+  document.head.appendChild(css);
+
+  const estado = { area:null, a:null, m:null, fmt:'A4', semana:0, semanas:[], fmtEscolhido:false };
+
+  function usuarioAtual(){ try{ return (currentUser && currentUser.nome) || ''; }catch(e){ return ''; } }
+  function hojeRef(){ try{ return new Date(currentDate); }catch(e){ return new Date(); } }
+
+  function opcoesMeses(){
+    const ref = hojeRef(), out = [];
+    for(let i=-3;i<=2;i++){ const d = new Date(ref.getFullYear(), ref.getMonth()+i, 1); out.push({a:d.getFullYear(), m:d.getMonth()}); }
+    return out;
+  }
+  function selArea(id, areas, valor){
+    return `<div class="pp-sel">${IC.pin}<select id="${id}" aria-label="Área ou local">${areas.map(n => `<option value="${ESC(n)}"${n===valor?' selected':''}>${ESC(n)}</option>`).join('')}</select></div>`;
+  }
+  function selMes(id){
+    return `<div class="pp-sel">${IC.cal}<select id="${id}" aria-label="Mês de referência">${opcoesMeses().map(o => `<option value="${o.a}-${o.m}"${o.a===estado.a&&o.m===estado.m?' selected':''}>${MESES[o.m]}/${o.a}</option>`).join('')}</select></div>`;
+  }
+  function areaPadrao(areas){
+    let salvo = null; try{ salvo = localStorage.getItem(PREF_AREA); }catch(e){}
+    if(estado.area && areas.includes(estado.area)) return estado.area;
+    if(salvo && areas.includes(salvo)) return salvo;
+    return areas[0] || null;
+  }
+  function formatoSugerido(){
+    const mx = maxNoMes(estado.area, estado.a, estado.m);
+    return {mx, fmt: mx > capacidade('A4') ? 'A3' : 'A4'};
+  }
+
+  /* ---------- painel "Imprimir Plano de Limpeza" ---------- */
+  let ultimoFoco = null;
+  function abrirPainel(){
+    ultimoFoco = document.activeElement;
+    const ref = hojeRef();
+    if(estado.a===null){ estado.a = ref.getFullYear(); estado.m = ref.getMonth(); }
+    const areas = areasDoMes(estado.a, estado.m);
+    estado.area = areaPadrao(areas);
+    fecharPainel(true);
+    const veu = document.createElement('div'); veu.id = 'ppVeu'; veu.className = 'pp-root';
+    const p = document.createElement('aside'); p.id = 'ppPainel'; p.className = 'pp-root';
+    p.setAttribute('role','dialog'); p.setAttribute('aria-modal','true'); p.setAttribute('aria-labelledby','ppTit');
+    p.innerHTML = `
+      <div class="pp-hd">${IC.print}<h3 id="ppTit">Imprimir Plano de Limpeza</h3><button type="button" class="pp-x" id="ppFechar" aria-label="Fechar">${IC.x}</button></div>
+      <p class="pp-lead">Selecione a área e o mês para gerar a ficha física semanal, com T1 e T2 na mesma folha.</p>
+      <div class="pp-corpo">
+        <div class="pp-campo"><label for="ppArea">Área / Local</label>${selArea('ppArea', areas, estado.area)}</div>
+        <div class="pp-campo"><label for="ppMes">Mês de referência</label>${selMes('ppMes')}</div>
+        <div class="pp-campo"><span class="pp-lb">Formato de impressão</span>
+          <label class="pp-rad"><input type="radio" name="ppFmt" value="A4"> A4 — paisagem <small>(padrão)</small></label>
+          <label class="pp-rad"><input type="radio" name="ppFmt" value="A3"> A3 — paisagem <small>(áreas com muitas periodicidades)</small></label>
+          <div class="pp-dica" id="ppDica"></div>
+        </div>
+        <div class="pp-sep"></div>
+        <div class="pp-auto">${IC.doc}<div><b>A ficha é montada a partir do plano vigente:</b><ul>
+          <li>${IC.ok}Identificação da área, semana e mês</li>
+          <li>${IC.ok}Periodicidades reais de cada dia, por turno</li>
+          <li>${IC.ok}Checklist de atividades vinculado ao local</li>
+          <li>${IC.ok}Campos de início e fim para marcação manual</li></ul></div></div>
+      </div>
+      <div class="pp-pe"><button type="button" class="pp-gerar" id="ppGerar">${IC.print}Gerar para impressão</button></div>`;
+    document.body.appendChild(veu); document.body.appendChild(p);
+    requestAnimationFrame(() => { veu.classList.add('on'); p.classList.add('on'); });
+    const atualizarDica = (forcarSugestao) => {
+      const s = formatoSugerido();
+      if(forcarSugestao || !estado.fmtEscolhido) estado.fmt = s.fmt;
+      p.querySelectorAll('input[name=ppFmt]').forEach(r => { r.checked = r.value===estado.fmt; });
+      const dica = p.querySelector('#ppDica');
+      const capA4 = capacidade('A4');
+      if(!s.mx){ dica.className = 'pp-dica alerta'; dica.textContent = 'Este local não tem periodicidades previstas neste mês. As folhas sairão sem campos de registro.'; }
+      else if(s.mx > capA4){ dica.className = 'pp-dica alerta'; dica.textContent = `Até ${s.mx} periodicidades por turno neste mês. Em A4 os campos de horário ficariam pequenos para escrita à mão; A3 foi selecionado.`; }
+      else { dica.className = 'pp-dica'; dica.textContent = `Até ${s.mx} ${s.mx===1?'periodicidade':'periodicidades'} por turno neste mês. O A4 comporta até ${capA4} com campos confortáveis.`; }
+    };
+    atualizarDica();
+    p.querySelector('#ppArea').onchange = e => { estado.area = e.target.value; estado.fmtEscolhido = false; atualizarDica(true); };
+    p.querySelector('#ppMes').onchange = e => {
+      const [a,m] = e.target.value.split('-').map(Number); estado.a = a; estado.m = m;
+      const novas = areasDoMes(a, m); estado.area = areaPadrao(novas);
+      p.querySelector('#ppArea').parentElement.outerHTML = selArea('ppArea', novas, estado.area);
+      p.querySelector('#ppArea').onchange = ev => { estado.area = ev.target.value; estado.fmtEscolhido = false; atualizarDica(true); };
+      estado.fmtEscolhido = false; atualizarDica(true);
+    };
+    p.querySelectorAll('input[name=ppFmt]').forEach(r => r.onchange = () => { estado.fmt = r.value; estado.fmtEscolhido = true; });
+    p.querySelector('#ppFechar').onclick = () => fecharPainel();
+    veu.onclick = () => fecharPainel();
+    p.querySelector('#ppGerar').onclick = () => { if(!estado.area) return; fecharPainel(); abrirPrevia(); };
+    setTimeout(() => { const s = p.querySelector('#ppArea'); if(s) s.focus(); }, 60);
+  }
+  function fecharPainel(imediato){
+    const p = document.getElementById('ppPainel'), v = document.getElementById('ppVeu');
+    if(!p && !v) return;
+    if(imediato){ p && p.remove(); v && v.remove(); return; }
+    p && p.classList.remove('on'); v && v.classList.remove('on');
+    setTimeout(() => { p && p.remove(); v && v.remove(); }, 220);
+    if(ultimoFoco && ultimoFoco.focus && !document.getElementById('ppPrevia')) try{ ultimoFoco.focus(); }catch(e){}
+  }
+
+  /* ---------- prévia fiel + impressão ---------- */
+  function ctxBase(){
+    const g = new Date();
+    return {area: estado.area, a: estado.a, m: estado.m, fmt: estado.fmt, total: estado.semanas.length,
+            gerado: ddmmaaaa(g)+' '+hhmm(g), usuario: usuarioAtual()};
+  }
+  async function prepararSemanas(){
+    await garantirAtividades();
+    try{ if(typeof _plAtivoCache!=='undefined') _plAtivoCache.clear(); }catch(e){}
+    estado.semanas = semanasDoMes(estado.a, estado.m).map((seg, idx) => ({idx, sem: montarSemana(estado.area, seg)}));
+    const ref = hojeRef(), segRef = segundaDe(ref).getTime();
+    const i = estado.semanas.findIndex(s => s.sem.seg.getTime()===segRef);
+    estado.semana = i >= 0 ? i : 0;
+  }
+
+  let resizeObs = null;
+  async function abrirPrevia(){
+    fecharPrevia();
+    const pv = document.createElement('div'); pv.id = 'ppPrevia'; pv.className = 'pp-root';
+    pv.setAttribute('role','dialog'); pv.setAttribute('aria-modal','true'); pv.setAttribute('aria-label','Prévia de impressão do plano');
+    pv.innerHTML = `
+      <div class="pv-bar">
+        <h3>${IC.print}Prévia de impressão</h3>
+        <div id="pvAreaBox"></div>
+        <div id="pvMesBox"></div>
+        <div class="pv-sem"><button type="button" id="pvAnt" aria-label="Semana anterior">${IC.esq}</button><span id="pvSemTxt">—</span><button type="button" id="pvProx" aria-label="Próxima semana">${IC.dir}</button></div>
+        <div class="pv-seg" role="group" aria-label="Formato"><button type="button" data-f="A4">A4</button><button type="button" data-f="A3">A3</button></div>
+        <span class="pv-esp"></span>
+        <button type="button" class="pv-b sec" id="pvImpSem">${IC.print}Imprimir semana</button>
+        <button type="button" class="pv-b pri" id="pvImpMes">${IC.print}<span id="pvImpMesTxt">Imprimir mês</span></button>
+        <button type="button" class="pp-x" id="pvFechar" aria-label="Fechar prévia">${IC.x}</button>
+      </div>
+      <div class="pv-aviso" id="pvAviso"></div>
+      <div class="pv-area" id="pvArea"><div class="pv-carr">Montando a ficha a partir do plano vigente…</div></div>
+      <div class="pv-dica">Uma folha por semana, paisagem. Para salvar em PDF, escolha “Salvar como PDF” no destino da impressão. Desative “Cabeçalhos e rodapés” do navegador e mantenha a escala em 100%.</div>`;
+    document.body.appendChild(pv);
+    document.body.style.overflow = 'hidden';
+    pv.querySelector('#pvFechar').onclick = fecharPrevia;
+    pv.querySelector('#pvAnt').onclick = () => { if(estado.semana > 0){ estado.semana--; desenharPrevia(); } };
+    pv.querySelector('#pvProx').onclick = () => { if(estado.semana < estado.semanas.length-1){ estado.semana++; desenharPrevia(); } };
+    pv.querySelectorAll('.pv-seg button').forEach(b => b.onclick = () => { estado.fmt = b.dataset.f; estado.fmtEscolhido = true; desenharPrevia(); });
+    pv.querySelector('#pvImpSem').onclick = () => imprimir([estado.semanas[estado.semana]]);
+    pv.querySelector('#pvImpMes').onclick = () => imprimir(estado.semanas);
+    montarSeletoresPrevia();
+    await prepararSemanas();
+    desenharPrevia();
+    if(window.ResizeObserver){ resizeObs = new ResizeObserver(() => escalar()); resizeObs.observe(pv.querySelector('#pvArea')); }
+  }
+  function montarSeletoresPrevia(){
+    const pv = document.getElementById('ppPrevia'); if(!pv) return;
+    const areas = areasDoMes(estado.a, estado.m);
+    if(!areas.includes(estado.area)) estado.area = areaPadrao(areas);
+    pv.querySelector('#pvAreaBox').innerHTML = selArea('pvArea_s', areas, estado.area);
+    pv.querySelector('#pvMesBox').innerHTML = selMes('pvMes_s');
+    pv.querySelector('#pvArea_s').onchange = async e => { estado.area = e.target.value; lembrarArea(); estado.fmtEscolhido = false; estado.fmt = formatoSugerido().fmt; await recarregar(); };
+    pv.querySelector('#pvMes_s').onchange = async e => {
+      const [a,m] = e.target.value.split('-').map(Number); estado.a = a; estado.m = m;
+      estado.fmtEscolhido = false; montarSeletoresPrevia(); estado.fmt = formatoSugerido().fmt; await recarregar();
+    };
+  }
+  async function recarregar(){
+    const area = document.getElementById('pvArea'); if(area) area.innerHTML = '<div class="pv-carr">Montando a ficha a partir do plano vigente…</div>';
+    await prepararSemanas(); desenharPrevia();
+  }
+  function lembrarArea(){ try{ localStorage.setItem(PREF_AREA, estado.area); }catch(e){} }
+
+  function desenharPrevia(){
+    const pv = document.getElementById('ppPrevia'); if(!pv || !estado.semanas.length) return;
+    lembrarArea();
+    const s = estado.semanas[estado.semana], fim = somaDias(s.sem.seg, 6);
+    pv.querySelector('#pvSemTxt').textContent = `Semana ${estado.semana+1} de ${estado.semanas.length} · ${ddmm(s.sem.seg)} a ${ddmm(fim)}`;
+    pv.querySelector('#pvAnt').disabled = estado.semana===0;
+    pv.querySelector('#pvProx').disabled = estado.semana===estado.semanas.length-1;
+    pv.querySelector('#pvImpMesTxt').textContent = `Imprimir mês (${estado.semanas.length} folhas)`;
+    pv.querySelectorAll('.pv-seg button').forEach(b => b.classList.toggle('on', b.dataset.f===estado.fmt));
+    // aviso de usabilidade física
+    const L = layoutDaFolha(s.sem, estado.fmt), aviso = pv.querySelector('#pvAviso');
+    const mxMes = Math.max(...estado.semanas.map(x => Math.max(...x.sem.turnos.map(t => t.N))));
+    if(estado.fmt==='A4' && mxMes > capacidade('A4')){
+      aviso.innerHTML = `<span>Este local tem até ${mxMes} periodicidades por turno. Em A4 cada campo de horário fica com ${L.campoW.toFixed(0)} mm, pouco para escrever à mão.</span><button type="button" id="pvUsarA3">Usar A3</button>`;
+      aviso.classList.add('on'); aviso.querySelector('#pvUsarA3').onclick = () => { estado.fmt = 'A3'; estado.fmtEscolhido = true; desenharPrevia(); };
+    }else if(!mxMes){
+      aviso.innerHTML = '<span>Não há periodicidades previstas para este local no mês selecionado. As folhas sairão apenas com a identificação.</span>'; aviso.classList.add('on');
+    }else if(L.apertado){
+      aviso.innerHTML = '<span>O conteúdo desta semana deixa as linhas de registro baixas nesta folha.</span><button type="button" id="pvUsarA3">Usar A3</button>';
+      aviso.classList.add('on'); const b = aviso.querySelector('#pvUsarA3'); if(estado.fmt==='A3') b.remove(); else b.onclick = () => { estado.fmt='A3'; estado.fmtEscolhido = true; desenharPrevia(); };
+    }else{ aviso.classList.remove('on'); aviso.innerHTML = ''; }
+    // folha
+    const F = FORMATOS[estado.fmt], MM = 96/25.4, W = Math.round(F.w*MM), H = Math.round(F.h*MM);
+    const area = pv.querySelector('#pvArea');
+    area.innerHTML = `<div class="pv-folha" id="pvFolha"><iframe id="pvFrame" title="Prévia da folha" width="${W}" height="${H}" scrolling="no"></iframe></div>`;
+    const fr = area.querySelector('#pvFrame');
+    fr.srcdoc = documento([s], ctxBase(), {previa:true});
+    fr.dataset.w = W; fr.dataset.h = H;
+    escalar();
+  }
+  function escalar(){
+    const area = document.getElementById('pvArea'), box = document.getElementById('pvFolha'), fr = document.getElementById('pvFrame');
+    if(!area || !box || !fr) return;
+    const W = +fr.dataset.w, H = +fr.dataset.h;
+    const pad = window.innerWidth <= 768 ? 20 : 44;
+    const porLargura = (area.clientWidth - pad) / W, porAltura = (area.clientHeight - pad) / H;
+    // folha inteira visível; em telas estreitas prioriza a largura (rolagem vertical)
+    const sc = Math.min(1.35, Math.max(.2, window.innerWidth <= 768 ? porLargura : Math.max(Math.min(porLargura, porAltura), Math.min(porLargura, .62))));
+    fr.style.transform = `scale(${sc})`;
+    box.style.width = (W*sc)+'px'; box.style.height = (H*sc)+'px';
+  }
+  function fecharPrevia(){
+    const pv = document.getElementById('ppPrevia');
+    if(resizeObs){ try{ resizeObs.disconnect(); }catch(e){} resizeObs = null; }
+    if(pv){ pv.remove(); document.body.style.overflow = ''; }
+    const b = document.getElementById('ppBtnAbrir'); if(b) try{ b.focus(); }catch(e){}
+  }
+
+  function imprimir(lista){
+    if(!lista || !lista.length) return;
+    const pv = document.getElementById('ppPrevia');
+    const botoes = pv ? pv.querySelectorAll('#pvImpSem,#pvImpMes') : [];
+    botoes.forEach(b => b.disabled = true);
+    document.getElementById('ppImpFrame')?.remove();
+    const fr = document.createElement('iframe');
+    fr.id = 'ppImpFrame'; fr.setAttribute('aria-hidden','true'); fr.tabIndex = -1;
+    fr.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(fr);
+    const liberar = () => botoes.forEach(b => b.disabled = false);
+    fr.onload = () => {
+      setTimeout(() => {
+        try{
+          const w = fr.contentWindow;
+          w.addEventListener('afterprint', () => { liberar(); setTimeout(() => fr.remove(), 500); });
+          w.focus(); w.print();
+        }catch(e){ console.error('[Impressão]', e); alert('Não foi possível abrir a impressão neste navegador.'); }
+        setTimeout(liberar, 1500);
+      }, 300);
+    };
+    fr.srcdoc = documento(lista, ctxBase());
+  }
+
+  document.addEventListener('keydown', e => {
+    if(e.key!=='Escape') return;
+    if(document.getElementById('ppPainel')){ fecharPainel(); e.stopPropagation(); }
+    else if(document.getElementById('ppPrevia')){ fecharPrevia(); e.stopPropagation(); }
+  }, true);
+
+  /* ---------- botão no cabeçalho do Plano de Limpeza ---------- */
+  function injetarBotao(){
+    let sec = null; try{ sec = section; }catch(e){}
+    const velho = document.getElementById('ppBtnAbrir');
+    if(sec!=='checklist'){ if(velho) velho.remove(); return; }
+    const tc = document.getElementById('topControls'); if(!tc || velho) return;
+    const b = document.createElement('button');
+    b.type = 'button'; b.id = 'ppBtnAbrir'; b.className = 'pp-btn-abrir';
+    b.title = 'Imprimir o plano físico semanal por local e turno';
+    b.innerHTML = IC.print + '<span>Imprimir Plano</span>';
+    b.onclick = abrirPainel;
+    const hoje = document.getElementById('btnHoje');
+    if(hoje && hoje.parentNode===tc) hoje.insertAdjacentElement('afterend', b); else tc.appendChild(b);
+  }
+  try{
+    const _rtcImp = renderTopControls;
+    renderTopControls = function(){ const r = _rtcImp.apply(this, arguments); try{ injetarBotao(); }catch(e){ console.warn('[Impressão]', e); } return r; };
+    injetarBotao();
+  }catch(e){ console.error('[Impressão] módulo não instalado (o sistema segue normalmente):', e); }
+
+  /* gera o documento de impressão sem abrir a tela (conferência/teste): ppDocumento('CCM', 2026, 9, 'A4') */
+  window.ppDocumento = async function(area, a, m, fmt){
+    await garantirAtividades();
+    const semanas = semanasDoMes(a, m).map((seg, idx) => ({idx, sem: montarSemana(area, seg)}));
+    const g = new Date();
+    return documento(semanas, {area, a, m, fmt: fmt||'A4', total: semanas.length, gerado: ddmmaaaa(g)+' '+hhmm(g), usuario: usuarioAtual()});
+  };
+  /* utilitário de conferência (console): ppConferir('Banheiro Staff', 2026, 9) */
+  window.ppConferir = async function(area, a, m){
+    await garantirAtividades();
+    return semanasDoMes(a, m).map(seg => { const s = montarSemana(area, seg); return {
+      semana: ddmmaaaa(seg), T1: s.turnos[0].linhas.map(l => DIAS[l.d.getDay()]+' '+ddmm(l.d)+': '+l.n),
+      T2: s.turnos[1].linhas.map(l => DIAS[l.d.getDay()]+' '+ddmm(l.d)+': '+l.n),
+      checklistT1: s.turnos[0].lista, checklistT2: s.turnos[1].lista }; });
+  };
+})();
+
+</script>
 </body>
 </html>
